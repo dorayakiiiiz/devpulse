@@ -3,7 +3,7 @@
 - Module: Auth
 - Người phụ trách: Fullstack Developer
 - Ngày soạn: 2026-10-29
-- Trạng thái: Draft
+- Trạng thái: Approved
 
 ---
 

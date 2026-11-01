@@ -5,7 +5,6 @@ import {
   changePassword,
   deleteAccount,
 } from '../controllers/userController.js';
-import { authenticate } from '../middlewares/authMiddleware.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import {
   updateProfileSchema,
@@ -15,17 +14,17 @@ import {
 
 const router = Router();
 
-// Retrieve authenticated user profile
-router.get('/profile', authenticate, getProfile);
+// Retrieve user profile
+router.get('/profile', getProfile);
 
 // Update user display name
-router.put('/profile', authenticate, validateRequest(updateProfileSchema), updateProfile);
+router.put('/profile', validateRequest(updateProfileSchema), updateProfile);
 
 // Change user password requiring current password verification
-router.put('/change-password', authenticate, validateRequest(changePasswordSchema), changePassword);
+router.put('/change-password', validateRequest(changePasswordSchema), changePassword);
 
 // Permanently delete user account confirming with current password
-router.delete('/account', authenticate, validateRequest(deleteAccountSchema), deleteAccount);
+router.delete('/account', validateRequest(deleteAccountSchema), deleteAccount);
 
 export default router;
 

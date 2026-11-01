@@ -11,3 +11,15 @@ export const otpIpLimiter = rateLimit({
     next(new AppError('Too many requests from this IP, please try again after 15 minutes', 429));
   },
 });
+
+// Rate limiting middleware protecting instant ping endpoints against user spam
+export const instantPingLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || req.ip || 'anonymous',
+  handler: (_req, _res, next) => {
+    next(new AppError('Instant ping limit exceeded. Maximum 5 requests per minute allowed.', 429));
+  },
+});

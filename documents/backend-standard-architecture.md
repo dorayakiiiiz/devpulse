@@ -556,6 +556,95 @@ private mapToDto(user: IUser): AuthUserDto {
   * Bảo mật: Không bao giờ vô tình để lộ hash mật khẩu hay token nội bộ.
   * Ổn định API Contract: Nếu database đổi tên cột, ta chỉ cần đổi mapping tại hàm này mà frontend không bị ảnh hưởng.
 
+### 6.3. Cô lập tài nguyên & Phòng chống IDOR: Database Scoping Pattern
+
+Trong các ứng dụng web thực tế, việc quản lý quyền sở hữu dữ liệu (*Resource Ownership & Authorization*) được phân chia thành 2 nhóm bản chất dữ liệu hoàn toàn khác biệt:
+
+#### A. Phân biệt 2 nhóm tài nguyên trong hệ thống:
+
+| Đặc điểm | Nhóm 1: Tài nguyên chủ thể (Self-Entities) | Nhóm 2: Tài nguyên con độc lập (Sub-Resources) |
+| :--- | :--- | :--- |
+| **Ví dụ endpoint** | `/api/users/profile`, `/api/users/change-password` | `/api/monitors/:id`, `/api/orders/:id`, `/api/posts/:id` |
+| **Tham số URL** | **Hoàn toàn không có tham số `/:id` trên URL**. | **Chứa tham số `/:id` trên URL**. |
+| **Bản chất định danh** | ID lấy trực tiếp từ JWT Token đã được xác thực (`req.user.id`). | `:id` là **Khóa chính của tài nguyên trong database** (`monitors._id`), hoàn toàn không phải `userId`. |
+| **Nguy cơ bảo mật** | **Không có nguy cơ IDOR**. Người dùng chỉ có thể tự cập nhật dữ liệu của chính mình. | **Nguy cơ IDOR / BOLA rất cao** (OWASP API Top 1): User A có thể gửi request thao tác vào ID của User B. |
+| **Cơ chế xử lý** | Truy vấn thẳng theo khóa chính `findById(userId)`. Không cần bất kỳ bước check quyền sở hữu nào. | **Bắt buộc áp dụng Database Scoping** để cô lập truy vấn tại tầng cơ sở dữ liệu. |
+
+#### B. Chiến lược chuẩn mực: Database Scoping (Tenant / User Isolation)
+
+Thay vì viết code thủ công kiểm tra xem tài nguyên có tồn tại không rồi mới so sánh quyền (dễ gây lặp code và rò rỉ mã lỗi `403`), hệ thống chuẩn SaaS **luôn luôn kẹp chặt `userId` vào điều kiện truy vấn database**:
+
+1. **Nguyên tắc truy vấn kẹp User ID:**
+   * Mọi câu query tìm kiếm, cập nhật, xóa trên tài nguyên con bắt buộc phải có điều kiện kép: `{ _id: resourceId, userId: currentUserId }`.
+   * Được đóng gói thành phương thức chuyên biệt trong Repository:
+     ```typescript
+     // src/repositories/monitorRepository.ts
+     export class MonitorRepository extends BaseRepository<IMonitor> {
+       async findByIdAndUser(id: string, userId: string): Promise<IMonitor | null> {
+         return this.model.findOne({
+           _id: new Types.ObjectId(id),
+           userId: new Types.ObjectId(userId),
+         }).exec();
+       }
+
+       // Cập nhật trực tiếp 1 query duy nhất (Atomic Update)
+       async updateByIdAndUser(id: string, userId: string, update: UpdateQuery<IMonitor>): Promise<IMonitor | null> {
+         return this.model.findOneAndUpdate(
+           { _id: new Types.ObjectId(id), userId: new Types.ObjectId(userId) },
+           update,
+           { new: true }
+         ).exec();
+       }
+
+       // Xóa trực tiếp 1 query duy nhất (Atomic Delete)
+       async deleteByIdAndUser(id: string, userId: string): Promise<IMonitor | null> {
+         return this.model.findOneAndDelete({
+           _id: new Types.ObjectId(id),
+           userId: new Types.ObjectId(userId),
+         }).exec();
+       }
+     }
+     ```
+
+2. **Quy tắc phản hồi lỗi: Trả về `HTTP 404 Not Found` (OWASP Anti-Enumeration):**
+   * Nếu câu lệnh query kẹp `userId` trả về `null`, hệ thống **luôn luôn ném lỗi `HTTP 404 Not Found`**:
+     ```typescript
+     // src/services/monitorService.ts
+     async getMonitorById(userId: string, monitorId: string): Promise<MonitorResponseDto> {
+       const monitor = await monitorRepository.findByIdAndUser(monitorId, userId);
+       if (!monitor) {
+         throw new AppError('Monitor not found', 404);
+       }
+       return this.mapToDto(monitor);
+     }
+     ```
+   * **Tại sao không trả về `HTTP 403 Forbidden`?**
+     * Nếu trả về `403`, hệ thống vô tình xác nhận với kẻ tấn công: *"ID này có tồn tại trong database, chỉ là bạn không có quyền xem"*. Tin tặc có thể dùng script quét vét cạn (brute-force ID) để phát hiện toàn bộ các ID hợp lệ của hệ thống (lỗ hổng Resource Enumeration).
+     * Khi trả về `404`, hệ thống hoàn toàn che giấu thông tin: *"Tài nguyên này không hề tồn tại trong không gian dữ liệu của bạn"*.
+
+3. **Tối ưu hóa hiệu năng và vòng đời Document:**
+   * Khi cập nhật hoặc chuyển trạng thái, hệ thống sử dụng chính instance document đã được scoped để thay đổi trường dữ liệu và gọi `await doc.save()`:
+     ```typescript
+     async toggleMonitor(userId: string, monitorId: string): Promise<MonitorResponseDto> {
+       const monitor = await monitorRepository.findByIdAndUser(monitorId, userId);
+       if (!monitor) {
+         throw new AppError('Monitor not found', 404);
+       }
+
+       monitor.isActive = !monitor.isActive;
+       monitor.status = monitor.isActive ? 'pending' : 'paused';
+       await monitor.save();
+
+       return this.mapToDto(monitor);
+     }
+     ```
+   * **Lợi ích:** Tiết kiệm 50% số câu truy vấn (chỉ tốn đúng 1 câu SELECT scoped và 1 câu UPDATE theo compound index `{ _id: 1, userId: 1 }`), đồng thời kích hoạt đầy đủ Mongoose hooks/validation và giữ cho Service layer hoàn toàn sạch sẽ, không có bất kỳ logic kiểm tra quyền lặp lại nào.
+
+4. **Kết hợp linh hoạt giữa các phương thức thao tác dữ liệu:**
+   * **Với thao tác Xóa (Delete):** Không cần quan tâm dữ liệu cũ, gọi thẳng `deleteByIdAndUser(id, userId)` qua lệnh nguyên tử `findOneAndDelete`. Tiết kiệm bộ nhớ RAM vì không cần nạp Document lên Node.js trước khi xóa (1 câu query duy nhất).
+   * **Với thao tác Sửa đơn giản (Direct / Atomic Update):** Khi chỉ cập nhật các trường độc lập (ví dụ: đổi tên, cập nhật ghi chú, tăng giảm số đếm `$inc`) mà không cần so sánh dữ liệu cũ hay kích hoạt side-effect phức tạp, gọi thẳng `updateByIdAndUser(id, userId, updatePayload)` qua `findOneAndUpdate`. Chỉ tốn đúng **1 câu query duy nhất** và trả về document mới ngay lập tức mà không cần nạp document lên trước.
+   * **Với thao tác Sửa phức tạp (Conditional / State-dependent Update):** Dùng `findByIdAndUser` bốc Document lên RAM khi cần so sánh dữ liệu cũ với dữ liệu mới (ví dụ: phát hiện URL thay đổi để kích hoạt quét lại SSL, đảo cờ `isActive = !isActive`), sau đó gọi `doc.save()`.
+
 ---
 
 ## 7. Authentication & Account Management Blueprint

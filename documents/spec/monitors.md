@@ -72,7 +72,7 @@ Cung cấp khả năng quản lý cấu hình các mục tiêu giám sát cho ng
 3. Hệ thống kiểm tra khóa cooldown `ping_cooldown:${id}` trong `node-cache`:
    - Nếu khóa đang tồn tại: Hệ thống từ chối yêu cầu và trả về mã HTTP 429 kèm thông báo thời gian cần chờ.
    - Nếu khóa chưa tồn tại: Hệ thống thiết lập khóa với thời gian sống 15 giây.
-4. Hệ thống kiểm tra giới hạn tần suất tài khoản: tối đa 10 requests trong 1 phút cho mỗi người dùng.
+4. Hệ thống kiểm tra giới hạn tần suất tài khoản: tối đa 5 requests trong 1 phút cho mỗi người dùng.
 5. Hệ thống chuyển tiếp yêu cầu đến Ping Engine để thực thi một lượt kiểm tra ngay lập tức.
 6. Trả về kết quả đo lường độ trễ và trạng thái mới nhất cho người dùng với mã HTTP 200.
 
@@ -155,8 +155,7 @@ export interface InstantPingResponse {
 | 201 | Tạo mới mục tiêu giám sát thành công |
 | 400 | Định dạng URL không hợp lệ hoặc chu kỳ kiểm tra nằm ngoài danh sách cho phép |
 | 401 | Thiếu phiên đăng nhập hợp lệ |
-| 403 | Thao tác trên mục tiêu thuộc quyền sở hữu của người dùng khác |
-| 404 | Không tìm thấy mục tiêu theo mã định danh cung cấp |
+| 404 | Không tìm thấy mục tiêu theo mã định danh cung cấp hoặc không thuộc quyền sở hữu |
 | 429 | Gọi kiểm tra tức thì khi chưa hết thời gian cooldown 15 giây hoặc vượt quá giới hạn tần suất |
 
 ---
@@ -183,8 +182,7 @@ export interface InstantPingResponse {
 | :--- | :--- | :--- |
 | URL không đúng định dạng mạng | Định dạng URL không hợp lệ | Trả về HTTP 400 |
 | Interval khác 30, 60, 300 | Chu kỳ kiểm tra chỉ nhận 30, 60 hoặc 300 giây | Trả về HTTP 400 |
-| Sửa mục tiêu của user khác | Bạn không có quyền chỉnh sửa mục tiêu này | Trả về HTTP 403 |
-| ID mục tiêu không tồn tại | Không tìm thấy mục tiêu theo dõi | Trả về HTTP 404 |
+| Thao tác mục tiêu của user khác hoặc không tồn tại | Không tìm thấy mục tiêu theo dõi | Trả về HTTP 404 |
 | URL https có chứng chỉ SSL lỗi | Mục tiêu được tạo kèm cảnh báo chứng chỉ không hợp lệ | Ghi nhận lỗi chứng chỉ vào `sslInfo` và trả về HTTP 201 |
 | Mục tiêu bị tạm dừng | Trạng thái hiển thị paused | Không đưa mục tiêu vào vòng lặp ping định kỳ |
 | Bấm kiểm tra tức thì liên tiếp dưới 15s | Vui lòng đợi 15 giây trước khi thực hiện lần kiểm tra tiếp theo | Trả về HTTP 429 Too Many Requests |
@@ -211,7 +209,7 @@ export interface InstantPingResponse {
 - Chỉ chấp nhận các mục tiêu sử dụng giao thức web tiêu chuẩn HTTP và HTTPS.
 - Không cho phép người dùng tùy ý cấu hình chu kỳ kiểm tra nhỏ hơn 30 giây nhằm bảo vệ tài nguyên mạng của máy chủ.
 - Cơ chế quét chứng chỉ SSL tự động đặt thời gian chờ tối đa 5 giây để tránh treo tiến trình.
-- Áp dụng thời gian cooldown 15 giây cho mỗi mục tiêu và giới hạn tối đa 10 lượt kiểm tra tức thì mỗi phút cho mỗi tài khoản.
+- Áp dụng thời gian cooldown 15 giây cho mỗi mục tiêu và giới hạn tối đa 5 lượt kiểm tra tức thì mỗi phút cho mỗi tài khoản.
 
 ---
 
@@ -234,11 +232,11 @@ export interface InstantPingResponse {
 | Tạo monitor với interval sai | URL hợp lệ, interval 45 | HTTP 400 Bad Request |
 | Tạo monitor với URL sai định dạng | Chuỗi text không phải URL | HTTP 400 Bad Request |
 | Lấy danh sách monitors của user | Request có session của user A | HTTP 200 + mảng monitors của user A |
-| Sửa monitor của user khác | ID của user B gửi bởi user A | HTTP 403 Forbidden |
+| Sửa monitor của user khác | ID của user B gửi bởi user A | HTTP 404 Not Found |
 | Bật tắt monitor thành công | PATCH toggle monitor ID hợp lệ | HTTP 200 + isActive bị đảo giá trị |
 | Kích hoạt kiểm tra tức thì | POST `/api/monitors/:id/ping` của chính mình | HTTP 200 + kết quả đo lường latency mới nhất |
 | Kích hoạt kiểm tra trong cooldown | Gọi ping liên tiếp 2 lần trong 5s | HTTP 429 Too Many Requests |
-| Kích hoạt kiểm tra monitor người khác | POST `/api/monitors/:id/ping` của user B | HTTP 403 Forbidden |
+| Kích hoạt kiểm tra monitor người khác | POST `/api/monitors/:id/ping` của user B | HTTP 404 Not Found |
 | Xóa monitor thành công | DELETE monitor ID hợp lệ | HTTP 200 + bản ghi bị xóa khỏi database |
 | Xóa monitor không tồn tại | DELETE ID ngẫu nhiên không có trong DB | HTTP 404 Not Found |
 
