@@ -9,6 +9,7 @@ export interface IUser extends Document {
   passwordHash: string;
   role: UserRole;
   isVerified: boolean;
+  tokenVersion: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,6 +44,11 @@ const userSchema = new Schema<IUser>(
     isVerified: {
       type: Boolean,
       default: false,
+      required: true,
+    },
+    tokenVersion: {
+      type: Number,
+      default: 0,
       required: true,
     },
   },

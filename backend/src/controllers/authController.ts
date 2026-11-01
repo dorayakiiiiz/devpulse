@@ -1,16 +1,23 @@
 import { Request, Response, NextFunction } from 'express';
 import { authService } from '../services/authService.js';
 import { sendSuccess } from '../utils/response.js';
+import { AppError } from '../utils/appError.js';
 import { env } from '../config/env.js';
 
-const COOKIE_NAME = 'accessToken';
+export const REFRESH_COOKIE_NAME = 'refreshToken';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
-// Cookie configuration options enforcing HttpOnly and strict site isolation
-const cookieOptions = {
+// Base cookie configuration options enforcing HttpOnly and strict site isolation
+export const baseCookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === 'production',
   sameSite: 'strict' as const,
+  path: '/',
+};
+
+// Refresh token cookie configuration with retention lifetime
+export const refreshCookieOptions = {
+  ...baseCookieOptions,
   maxAge: SEVEN_DAYS_MS,
 };
 
@@ -24,13 +31,13 @@ export async function register(req: Request, res: Response, next: NextFunction):
   }
 }
 
-// Verify email OTP, activate account and set secure HttpOnly JWT session cookie
+// Verify email OTP, activate account and issue access and refresh tokens
 export async function verifyEmail(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { user, token } = await authService.verifyEmail(req.body);
+    const { user, accessToken, refreshToken } = await authService.verifyEmail(req.body);
 
-    res.cookie(COOKIE_NAME, token, cookieOptions);
-    sendSuccess(res, user, 'Account verified and activated successfully', 200);
+    res.cookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions);
+    sendSuccess(res, { user, accessToken }, 'Account verified and activated successfully', 200);
   } catch (error) {
     next(error);
   }
@@ -46,26 +53,38 @@ export async function resendVerification(req: Request, res: Response, next: Next
   }
 }
 
-// Handle authentication login and set secure HttpOnly JWT session cookie
+// Handle authentication login, set refresh cookie and return access token in response payload
 export async function login(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { user, token } = await authService.login(req.body);
+    const { user, accessToken, refreshToken } = await authService.login(req.body);
 
-    res.cookie(COOKIE_NAME, token, cookieOptions);
-    sendSuccess(res, user, 'Login successful', 200);
+    res.cookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions);
+    sendSuccess(res, { user, accessToken }, 'Login successful', 200);
   } catch (error) {
     next(error);
   }
 }
 
-// Clear authenticated session cookie
-export function logout(_req: Request, res: Response): void {
-  res.clearCookie(COOKIE_NAME, {
-    httpOnly: true,
-    secure: env.NODE_ENV === 'production',
-    sameSite: 'strict',
-  });
+// Verify refresh cookie and issue rotated tokens
+export async function refreshAccessToken(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const incomingRefreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+    if (!incomingRefreshToken) {
+      throw new AppError('Refresh token required', 401);
+    }
 
+    const { user, accessToken, refreshToken } = await authService.refreshToken(incomingRefreshToken);
+
+    res.cookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions);
+    sendSuccess(res, { user, accessToken }, 'Access token refreshed successfully', 200);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Clear authenticated session cookies
+export function logout(_req: Request, res: Response): void {
+  res.clearCookie(REFRESH_COOKIE_NAME, baseCookieOptions);
   sendSuccess(res, null, 'Logged out successfully', 200);
 }
 

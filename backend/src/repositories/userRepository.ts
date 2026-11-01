@@ -21,6 +21,16 @@ export class UserRepository extends BaseRepository<IUser> {
   async markVerified(userId: string): Promise<IUser | null> {
     return this.updateById(userId, { $set: { isVerified: true } });
   }
+
+  // Update user display name
+  async updateName(userId: string, name: string): Promise<IUser | null> {
+    return this.updateById(userId, { $set: { name } });
+  }
+
+  // Atomically increment token version to invalidate active refresh tokens
+  async incrementTokenVersion(userId: string): Promise<IUser | null> {
+    return this.updateById(userId, { $inc: { tokenVersion: 1 } });
+  }
 }
 
 export const userRepository = new UserRepository();

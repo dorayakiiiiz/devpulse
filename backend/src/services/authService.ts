@@ -33,6 +33,12 @@ export interface AuthUserDto {
   createdAt: string;
 }
 
+export interface AuthSessionResult {
+  user: AuthUserDto;
+  accessToken: string;
+  refreshToken: string;
+}
+
 export interface ResetPasswordDto {
   email: string;
   otp: string;
@@ -87,8 +93,8 @@ export class AuthService {
     return { email: normalizedEmail };
   }
 
-  // Verify registration OTP code, activate account and issue session token
-  async verifyEmail(data: VerifyEmailDto): Promise<{ user: AuthUserDto; token: string }> {
+  // Verify registration OTP code, activate account and issue auth session tokens
+  async verifyEmail(data: VerifyEmailDto): Promise<AuthSessionResult> {
     const normalizedEmail = data.email.toLowerCase().trim();
     const lockoutKey = `otp_lockout:${normalizedEmail}`;
 
@@ -110,14 +116,15 @@ export class AuthService {
       throw new AppError('Verification code is invalid or has expired', 400);
     }
 
-    if (otpRecord.attempts >= 4) {
-      await otpRepository.deleteByEmail(normalizedEmail);
-      memoryCache.set(lockoutKey, true, ONE_HOUR_SECONDS);
-      throw new AppError('Maximum attempts exceeded. This action is temporarily locked for 1 hour. Please try again later.', 429);
-    }
-
     const isMatch = await bcrypt.compare(data.otp, otpRecord.codeHash);
     if (!isMatch) {
+      const nextAttempts = otpRecord.attempts + 1;
+      if (nextAttempts >= 5) {
+        await otpRepository.deleteByEmail(normalizedEmail);
+        memoryCache.set(lockoutKey, true, ONE_HOUR_SECONDS);
+        throw new AppError('Maximum attempts exceeded. This action is temporarily locked for 1 hour. Please try again later.', 429);
+      }
+
       await otpRepository.incrementAttempts(normalizedEmail);
       throw new AppError('Verification code is invalid or has expired', 400);
     }
@@ -126,11 +133,12 @@ export class AuthService {
     await otpRepository.deleteByEmail(normalizedEmail);
 
     user.isVerified = true;
-    const token = this.generateToken(user._id.toString(), user.role);
+    const tokens = this.generateTokens(user._id.toString(), user.role, user.tokenVersion ?? 0);
 
     return {
       user: this.mapToDto(user),
-      token,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     };
   }
 
@@ -168,7 +176,7 @@ export class AuthService {
   }
 
   // Authenticate user credentials and enforce verified account constraint
-  async login(data: LoginDto): Promise<{ user: AuthUserDto; token: string }> {
+  async login(data: LoginDto): Promise<AuthSessionResult> {
     const normalizedEmail = data.email.toLowerCase().trim();
 
     const user = await userRepository.findByEmail(normalizedEmail);
@@ -185,11 +193,43 @@ export class AuthService {
       throw new AppError('Please verify your email address before logging in', 403);
     }
 
-    const token = this.generateToken(user._id.toString(), user.role);
+    const tokens = this.generateTokens(user._id.toString(), user.role, user.tokenVersion ?? 0);
 
     return {
       user: this.mapToDto(user),
-      token,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
+  }
+
+  // Verify refresh token and issue rotated session tokens
+  async refreshToken(token: string): Promise<AuthSessionResult> {
+    let decoded: { id: string; tokenVersion?: number };
+    try {
+      decoded = jwt.verify(token, env.JWT_REFRESH_SECRET) as { id: string; tokenVersion?: number };
+    } catch {
+      throw new AppError('Invalid or expired refresh token', 401);
+    }
+
+    const user = await userRepository.findById(decoded.id);
+    if (!user) {
+      throw new AppError('User account not found', 401);
+    }
+
+    if (!user.isVerified) {
+      throw new AppError('Please verify your email address before continuing', 403);
+    }
+
+    if (decoded.tokenVersion !== undefined && decoded.tokenVersion !== user.tokenVersion) {
+      throw new AppError('Invalid or revoked refresh token', 401);
+    }
+
+    const tokens = this.generateTokens(user._id.toString(), user.role, user.tokenVersion ?? 0);
+
+    return {
+      user: this.mapToDto(user),
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
     };
   }
 
@@ -241,42 +281,52 @@ export class AuthService {
       throw new AppError('Too many failed attempts. Password reset is locked for 1 hour. Please try again later.', 429);
     }
 
+    const user = await userRepository.findByEmail(normalizedEmail);
+    if (!user) {
+      throw new AppError('User account not found', 404);
+    }
+
     const otpRecord = await otpRepository.findByEmail(normalizedEmail);
     if (!otpRecord) {
       throw new AppError('Verification code is invalid or has expired', 400);
     }
 
-    if (otpRecord.attempts >= 4) {
-      await otpRepository.deleteByEmail(normalizedEmail);
-      memoryCache.set(lockoutKey, true, ONE_HOUR_SECONDS);
-      throw new AppError('Maximum attempts exceeded. This action is temporarily locked for 1 hour. Please try again later.', 429);
-    }
-
     const isMatch = await bcrypt.compare(data.otp, otpRecord.codeHash);
     if (!isMatch) {
+      const nextAttempts = otpRecord.attempts + 1;
+      if (nextAttempts >= 5) {
+        await otpRepository.deleteByEmail(normalizedEmail);
+        memoryCache.set(lockoutKey, true, ONE_HOUR_SECONDS);
+        throw new AppError('Maximum attempts exceeded. This action is temporarily locked for 1 hour. Please try again later.', 429);
+      }
+
       await otpRepository.incrementAttempts(normalizedEmail);
       throw new AppError('Verification code is invalid or has expired', 400);
-    }
-
-    const user = await userRepository.findByEmail(normalizedEmail);
-    if (!user) {
-      throw new AppError('User account not found', 400);
     }
 
     const salt = await bcrypt.genSalt(10);
     const newPasswordHash = await bcrypt.hash(data.newPassword, salt);
 
     await userRepository.updatePassword(user._id.toString(), newPasswordHash);
+    await userRepository.incrementTokenVersion(user._id.toString());
     await otpRepository.deleteByEmail(normalizedEmail);
   }
 
-  // Generate signed JWT token containing userId and role
-  private generateToken(userId: string, role: string): string {
-    return jwt.sign(
+  // Generate signed access and refresh tokens
+  private generateTokens(userId: string, role: string, tokenVersion: number): { accessToken: string; refreshToken: string } {
+    const accessToken = jwt.sign(
       { id: userId, role },
       env.JWT_SECRET,
       { expiresIn: env.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
     );
+
+    const refreshToken = jwt.sign(
+      { id: userId, tokenVersion },
+      env.JWT_REFRESH_SECRET,
+      { expiresIn: env.JWT_REFRESH_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
+    );
+
+    return { accessToken, refreshToken };
   }
 
   // Format database document to client DTO representation

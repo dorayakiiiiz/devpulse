@@ -4,6 +4,7 @@ import {
   verifyEmail,
   resendVerification,
   login,
+  refreshAccessToken,
   logout,
   getCurrentUser,
   forgotPassword,
@@ -35,8 +36,11 @@ router.post('/resend-verification', otpIpLimiter, validateRequest(resendVerifica
 // Public authentication login route
 router.post('/login', validateRequest(loginSchema), login);
 
+// Token rotation and session renewal route
+router.post('/refresh-token', refreshAccessToken);
+
 // Authenticated session termination route
-router.post('/logout', authenticate, logout);
+router.post('/logout', logout);
 
 // Authenticated session verification route
 router.get('/me', authenticate, getCurrentUser);

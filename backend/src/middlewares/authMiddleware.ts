@@ -3,18 +3,19 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
 import { AuthenticatedUserPayload } from '../types/express.js';
 import { AppError } from '../utils/appError.js';
+import { UserRole } from '../models/userModel.js';
 
 interface JwtPayloadDecoded {
   id: string;
-  role: 'member' | 'admin';
+  role: UserRole;
 }
 
-// Middleware verifying JWT session cookie and populating authenticated user context
+// Middleware verifying access token from Authorization header
 export function authenticate(req: Request, _res: Response, next: NextFunction): void {
-  const token = req.cookies?.accessToken || extractBearerToken(req.headers.authorization);
+  const token = extractBearerToken(req.headers.authorization);
 
   if (!token) {
-    next(new AppError('Authentication session required', 401));
+    next(new AppError('Authentication token required', 401));
     return;
   }
 
@@ -26,7 +27,7 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
     } as AuthenticatedUserPayload;
     next();
   } catch {
-    next(new AppError('Invalid or expired authentication session', 401));
+    next(new AppError('Invalid or expired authentication token', 401));
   }
 }
 
