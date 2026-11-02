@@ -48,7 +48,7 @@ Tự động hóa việc kiểm tra tính sẵn sàng của các mục tiêu the
 ## 4. Core Business Flows
 
 ### 4.1. Scheduled Ping Execution Flow
-1. Bộ lập lịch `node-cron` kích hoạt mỗi chu kỳ dựa trên cấu hình interval.
+1. Bộ lập lịch `node-cron` kích hoạt mỗi chu kỳ dựa trên cấu hình interval. Nếu chu kỳ trước của interval đó vẫn đang xử lý, hệ thống bỏ qua chu kỳ hiện tại để tránh tích tụ tác vụ khi các mục tiêu phản hồi chậm.
 2. Hệ thống truy vấn danh sách các monitors có `isActive: true` tương ứng với interval đó.
 3. Danh sách mục tiêu được đưa vào execution pool được kiểm soát bởi `p-limit` với giới hạn tối đa 5 requests đồng thời.
 4. Mỗi task ping thực thi:
@@ -111,8 +111,9 @@ export interface PingCompletedEvent {
 export interface PingEngineStatusResponse {
   activeMonitorsCount: number;
   bufferSize: number;
-  lastFlushAt: string;
+  lastFlushAt: string | null;
   concurrencyLimit: number;
+  isRunning: boolean;
 }
 ```
 

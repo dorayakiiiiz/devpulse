@@ -1,10 +1,14 @@
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { connectDatabase, disconnectDatabase } from './config/db.js';
+import { pingEngine } from './services/pingEngine.js';
 
 // Bootstrap backend server and handle lifecycle
 async function bootstrap(): Promise<void> {
   await connectDatabase();
+
+  // Start periodic ping engine schedulers and metric buffer flush timer
+  pingEngine.start();
 
   const app = createApp();
 
@@ -15,6 +19,13 @@ async function bootstrap(): Promise<void> {
   // Handle graceful shutdown on termination signals
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`[Server] Received ${signal}. Starting graceful shutdown...`);
+
+    // Stop accepting new pings and flush all remaining buffered metrics before closing DB
+    try {
+      await pingEngine.stop();
+    } catch (error) {
+      console.error('[Server] Error while stopping ping engine:', error);
+    }
 
     server.close(async () => {
       console.log('[Server] HTTP listener closed.');

@@ -1,6 +1,7 @@
 {
   "name": "devpulse-backend",
   "version": "1.0.0",
+  "type": "module",
   "private": true,
   "description": "DevPulse Backend API Service",
   "main": "dist/server.js",
