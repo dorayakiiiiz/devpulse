@@ -1,4 +1,5 @@
 import tls from 'tls';
+import net from 'net';
 import { URL } from 'url';
 import { ISslInfo } from '../models/monitorModel.js';
 
@@ -20,26 +21,33 @@ export async function checkSslCertificate(targetUrl: string, timeoutMs = 5000): 
 
   return new Promise((resolve) => {
     let timer: NodeJS.Timeout;
+    let isSettled = false;
+
+    // Deterministic resolution routine protected by isSettled guard
+    const cleanupAndResolve = (result: ISslInfo): void => {
+      if (isSettled) return;
+      isSettled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(result);
+    };
 
     // Establish direct TLS socket connection to inspect remote SSL certificate
+    // Exclude SNI servername when target is a raw IP address per RFC 6066
     const socket = tls.connect(
       {
         host,
         port,
-        servername: host,
+        servername: net.isIP(host) ? undefined : host,
         // Allow inspection of expired or self-signed certificates without aborting handshake
         rejectUnauthorized: false,
       },
       () => {
-        clearTimeout(timer);
-        // Retrieve detailed peer certificate chain from established TLS connection
-        const cert = socket.getPeerCertificate(true);
-        // Destroy TLS socket immediately after reading metadata to prevent socket and memory leaks
-        socket.destroy();
-
+        // Retrieve peer certificate without recursive chain parsing
+        const cert = socket.getPeerCertificate();
         const now = new Date();
         if (!cert || !cert.valid_to) {
-          resolve({
+          cleanupAndResolve({
             issuer: 'Unknown Issuer',
             validTo: new Date(0),
             daysRemaining: 0,
@@ -49,13 +57,14 @@ export async function checkSslCertificate(targetUrl: string, timeoutMs = 5000): 
         }
 
         const validToDate = new Date(cert.valid_to);
-        // Calculate remaining valid days by comparing expiration timestamp against current time
         const diffMs = validToDate.getTime() - now.getTime();
-        const daysRemaining = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+        const ONE_DAY_MS = 1000 * 60 * 60 * 24;
+        // Ceil for remaining active days so partial days count as 1 day; floor for overdue expired certs
+        const daysRemaining = diffMs >= 0 ? Math.ceil(diffMs / ONE_DAY_MS) : Math.floor(diffMs / ONE_DAY_MS);
         const rawIssuer = cert.issuer?.O || cert.issuer?.CN;
         const issuerName = Array.isArray(rawIssuer) ? rawIssuer.join(', ') : rawIssuer || 'Unknown Certificate Authority';
 
-        resolve({
+        cleanupAndResolve({
           issuer: issuerName,
           validTo: validToDate,
           daysRemaining,
@@ -64,11 +73,9 @@ export async function checkSslCertificate(targetUrl: string, timeoutMs = 5000): 
       }
     );
 
-    // Handle TLS handshake and connection failures cleanly without throwing unhandled exceptions
+    // Handle TLS handshake and connection failures cleanly
     socket.on('error', (err) => {
-      clearTimeout(timer);
-      socket.destroy();
-      resolve({
+      cleanupAndResolve({
         issuer: `Error: ${err.message || 'SSL Handshake Failed'}`,
         validTo: new Date(0),
         daysRemaining: 0,
@@ -76,11 +83,22 @@ export async function checkSslCertificate(targetUrl: string, timeoutMs = 5000): 
       });
     });
 
+    // Handle early connection termination by remote peer without waiting for timeout window
+    socket.on('close', (hadError) => {
+      if (!hadError) {
+        cleanupAndResolve({
+          issuer: 'Error: Connection closed by remote peer',
+          validTo: new Date(0),
+          daysRemaining: 0,
+          lastCheckedAt: new Date(),
+        });
+      }
+    });
+
     // Abort TLS socket and resolve fallback error if host does not respond within timeout window
     timer = setTimeout(() => {
-      socket.destroy();
-      resolve({
-        issuer: 'Error: Connection Timeout (5s)',
+      cleanupAndResolve({
+        issuer: `Error: Connection Timeout (${timeoutMs}ms)`,
         validTo: new Date(0),
         daysRemaining: 0,
         lastCheckedAt: new Date(),

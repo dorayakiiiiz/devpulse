@@ -1,6 +1,6 @@
 import { Types, UpdateQuery } from 'mongoose';
 import { BaseRepository } from './baseRepository.js';
-import { IMonitor, Monitor } from '../models/monitorModel.js';
+import { IMonitor, Monitor, MonitorStatus } from '../models/monitorModel.js';
 
 // Repository handling persistence operations for the monitors collection
 export class MonitorRepository extends BaseRepository<IMonitor> {
@@ -37,6 +37,33 @@ export class MonitorRepository extends BaseRepository<IMonitor> {
   // Retrieve active monitors matching a designated execution interval
   async findActiveByInterval(interval: number): Promise<IMonitor[]> {
     return this.model.find({ isActive: true, interval }).exec();
+  }
+
+  // Count total active monitors configured across the system
+  async countActive(): Promise<number> {
+    return this.model.countDocuments({ isActive: true }).exec();
+  }
+
+  // Bulk update status and lastCheckedAt for multiple monitors in a single database round-trip
+  async bulkUpdateStatus(updates: Map<string, { status: MonitorStatus; lastCheckedAt: Date }>): Promise<number> {
+    if (updates.size === 0) {
+      return 0;
+    }
+
+    const operations = Array.from(updates.entries()).map(([id, update]) => ({
+      updateOne: {
+        filter: { _id: new Types.ObjectId(id), isActive: true },
+        update: {
+          $set: {
+            status: update.status,
+            lastCheckedAt: update.lastCheckedAt,
+          },
+        },
+      },
+    }));
+
+    const result = await this.model.bulkWrite(operations, { ordered: false });
+    return result.modifiedCount || 0;
   }
 }
 

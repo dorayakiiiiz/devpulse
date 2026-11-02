@@ -4,6 +4,8 @@ import { IMonitor, HttpMethod, MonitorStatus, ISslInfo } from '../models/monitor
 import { checkSslCertificate } from '../utils/sslChecker.js';
 import { memoryCache } from '../utils/cache.js';
 import { AppError } from '../utils/appError.js';
+import { pingExecutor } from './pingExecutor.js';
+import { pingEngine } from './pingEngine.js';
 
 export interface CreateMonitorDto {
   name: string;
@@ -154,62 +156,32 @@ export class MonitorService {
 
     memoryCache.set(cooldownKey, true, 15);
 
-    // Enforce a hard 10-second timeout using AbortController to prevent hanging connections
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    const startTime = Date.now();
+    // Execute probe using the shared ping executor with retry logic
+    const result = await pingExecutor.pingTarget(monitor);
 
-    const headersRecord = monitor.headers instanceof Map
-      ? Object.fromEntries(monitor.headers)
-      : (monitor.headers as Record<string, string>) || {};
-
-    let statusCode = 0;
-    let isUp = false;
-    let errorMessage: string | undefined;
-
-    try {
-      // Attach abort signal to terminate HTTP request if 10-second threshold is exceeded
-      const response = await fetch(monitor.url, {
-        method: monitor.method,
-        headers: headersRecord,
-        signal: controller.signal,
-      });
-
-      statusCode = response.status;
-      isUp = statusCode >= 200 && statusCode < 400;
-    } catch (error) {
-      // Record network connection failure or timeout when target server is unreachable
-      errorMessage = error instanceof Error ? error.message : 'Network connection failure';
-      isUp = false;
-    } finally {
-      // Clear timeout timer immediately to avoid leaking active handles in Node event loop
-      clearTimeout(timeout);
-    }
-
-    const latency = Math.max(1, Date.now() - startTime);
-    const checkedAt = new Date();
-
-    monitor.lastCheckedAt = checkedAt;
+    // Update monitor document state
+    monitor.lastCheckedAt = result.checkedAt;
     if (monitor.isActive) {
-      monitor.status = isUp ? 'up' : 'down';
+      monitor.status = result.isUp ? 'up' : 'down';
     }
     await monitor.save();
 
+    // Delegate metric buffering and event publication to the ping engine ingestion pipeline
+    await pingEngine.recordPingResult(monitor, result);
+
     return {
       monitorId: monitor._id.toString(),
-      statusCode,
-      latency,
-      isUp,
-      checkedAt: checkedAt.toISOString(),
-      ...(errorMessage ? { error: errorMessage } : {}),
+      statusCode: result.statusCode,
+      latency: result.latency,
+      isUp: result.isUp,
+      checkedAt: result.checkedAt.toISOString(),
+      ...(result.error ? { error: result.error } : {}),
     };
   }
 
   // Transform internal Mongoose monitor document to client-safe response DTO
   private mapToDto(monitor: IMonitor): MonitorResponseDto {
-    const rawHeaders = monitor.headers instanceof Map
-      ? Object.fromEntries(monitor.headers)
-      : (monitor.headers as Record<string, string>) || {};
+    const rawHeaders = Object.fromEntries(monitor.headers);
 
     return {
       id: monitor._id.toString(),
