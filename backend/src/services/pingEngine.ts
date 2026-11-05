@@ -104,6 +104,16 @@ export class PingEngine {
     }
   }
 
+  // Probe target monitor, push metric to buffer, and publish completion event
+  async processSingleMonitor(monitor: IMonitor): Promise<void> {
+    try {
+      const result = await pingExecutor.pingTarget(monitor);
+      await this.recordPingResult(monitor, result);
+    } catch (error) {
+      console.error(`[PingEngine] Failed to process monitor ${monitor._id}:`, error);
+    }
+  }
+
   // Ingest probe result into memory buffer and broadcast completion event
   async recordPingResult(monitor: IMonitor, result: PingExecutionResult): Promise<void> {
     await metricBuffer.push({
@@ -115,6 +125,7 @@ export class PingEngine {
       error: result.error,
     });
 
+    // Emit ping completion event to all subscribers (onPingCompleted)
     eventBus.emitPingCompleted({
       monitorId: monitor._id.toString(),
       userId: monitor.userId.toString(),
@@ -124,16 +135,6 @@ export class PingEngine {
       timestamp: result.checkedAt.toISOString(),
       error: result.error,
     });
-  }
-
-  // Probe target monitor, push metric to buffer, and publish completion event
-  async processSingleMonitor(monitor: IMonitor): Promise<void> {
-    try {
-      const result = await pingExecutor.pingTarget(monitor);
-      await this.recordPingResult(monitor, result);
-    } catch (error) {
-      console.error(`[PingEngine] Failed to process monitor ${monitor._id}:`, error);
-    }
   }
 
   // Trigger immediate manual flush of the metric buffer

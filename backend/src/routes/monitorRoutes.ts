@@ -15,6 +15,7 @@ import {
   triggerInstantPing,
   deleteMonitor,
 } from '../controllers/monitorController.js';
+import { getMonitorIncidents } from '../controllers/incidentController.js';
 
 const router = Router();
 
@@ -24,6 +25,7 @@ router.post('/', validateRequest(createMonitorSchema), createMonitor);
 
 // Specific monitor operations scoped by ID
 router.get('/:id', validateRequest(monitorIdParamSchema), getMonitor);
+router.get('/:id/incidents', validateRequest(monitorIdParamSchema), getMonitorIncidents);
 router.put('/:id', validateRequest(updateMonitorSchema), updateMonitor);
 router.patch('/:id/toggle', validateRequest(monitorIdParamSchema), toggleMonitor);
 router.post('/:id/ping', instantPingLimiter, validateRequest(monitorIdParamSchema), triggerInstantPing);

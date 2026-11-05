@@ -19,11 +19,18 @@ export interface SseMonitorPingEvent {
 
 export interface SseIncidentAlertEvent {
   type: 'INCIDENT_ALERT';
+  incidentId: string;
   monitorId: string;
   status: 'ongoing' | 'resolved';
   startedAt: string;
   resolvedAt?: string;
-  summary?: string;
+  errorMessage?: string;
+  aiPostMortem?: {
+    summary: string;
+    rootCause: string;
+    actionItems: string[];
+    generatedAt: string;
+  };
 }
 
 // In-memory Server-Sent Events service streaming live metrics and incident alerts to connected clients
@@ -108,6 +115,7 @@ export class RealtimeService {
 
     const eventData: SseIncidentAlertEvent = {
       type: 'INCIDENT_ALERT',
+      incidentId: payload.incidentId,
       monitorId: payload.monitorId,
       status: payload.status,
       startedAt: payload.startedAt,
@@ -117,8 +125,12 @@ export class RealtimeService {
       eventData.resolvedAt = payload.resolvedAt;
     }
 
-    if (payload.summary) {
-      eventData.summary = payload.summary;
+    if (payload.errorMessage) {
+      eventData.errorMessage = payload.errorMessage;
+    }
+
+    if (payload.aiPostMortem) {
+      eventData.aiPostMortem = payload.aiPostMortem;
     }
 
     const message = `event: INCIDENT_ALERT\ndata: ${JSON.stringify(eventData)}\n\n`;

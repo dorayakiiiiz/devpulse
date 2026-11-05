@@ -108,11 +108,18 @@ export interface SseMonitorPingEvent {
 // Live Incident Alert Event with event name INCIDENT_ALERT
 export interface SseIncidentAlertEvent {
   type: 'INCIDENT_ALERT';
+  incidentId: string;
   monitorId: string;
   status: 'ongoing' | 'resolved';
   startedAt: string;
   resolvedAt?: string;
-  summary?: string;
+  errorMessage?: string;
+  aiPostMortem?: {
+    summary: string;
+    rootCause: string;
+    actionItems: string[];
+    generatedAt: string;
+  };
 }
 ```
 

@@ -162,9 +162,7 @@ private async executeSingleProbe(monitor: IMonitor): Promise<PingExecutionResult
   const timeout = setTimeout(() => controller.abort(), 10000);
   const startTime = Date.now();
 
-  const headersRecord = monitor.headers instanceof Map
-    ? Object.fromEntries(monitor.headers)
-    : (monitor.headers as Record<string, string>) || {};
+  const headersRecord = Object.fromEntries(monitor.headers);
 
   let statusCode = 0;
   let isUp = false;
@@ -201,7 +199,8 @@ private async executeSingleProbe(monitor: IMonitor): Promise<PingExecutionResult
     clearTimeout(timeout);
   }
 
-  const latency = Math.max(1, Date.now() - startTime);
+  // Set latency to 0 for unestablished connections (DNS failure or connection refused) per system spec
+  const latency = statusCode === 0 ? 0 : Math.max(1, Date.now() - startTime);
 
   return {
     statusCode,

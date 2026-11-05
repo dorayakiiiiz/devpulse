@@ -399,6 +399,6 @@ location /api/sse/ {
 | :--- | :--- | :--- | :--- |
 | **`CONNECTED`** | Ngay khi client mở kết nối thành công | `{"type":"CONNECTED", "userId":"...", "connectedAt":"..."}` | Đổi chấm trạng thái sang màu xanh (Live Streaming Active) |
 | **`MONITOR_PING`** | Ngay khi Ping Engine hoặc Instant Ping đo xong một monitor | `{"type":"MONITOR_PING", "monitorId":"...", "statusCode":200, "latency":45, "isUp":true, "timestamp":"..."}` | Bắn điểm dữ liệu mới vào đuôi biểu đồ Live Latency; đổi màu badge UP/DOWN |
-| **`INCIDENT_ALERT`** | Khi phát sinh sự cố mới hoặc sự cố được khôi phục | `{"type":"INCIDENT_ALERT", "monitorId":"...", "status":"ongoing", "startedAt":"..."}` | Hiển thị Banner cảnh báo đỏ tức thì trên Dashboard; cập nhật danh sách Incidents |
+| **`INCIDENT_ALERT`** | Khi phát sinh sự cố mới, chẩn đoán AI hoàn tất, hoặc sự cố được khôi phục | `{"type":"INCIDENT_ALERT", "incidentId":"...", "monitorId":"...", "status":"ongoing", "errorMessage":"...", "aiPostMortem":{...}}` | Hiển thị Banner cảnh báo đỏ tức thì trên Dashboard; cập nhật trạng thái phân tích AI và danh sách Incidents |
 | **`: heartbeat`** | Định kỳ mỗi 30 giây | *(Dòng chú thích SSE rỗng, không có data)* | Duy trì kết nối TCP không bị Nginx hoặc router mạng cắt quá hạn |
 

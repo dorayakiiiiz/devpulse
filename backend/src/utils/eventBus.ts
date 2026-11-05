@@ -16,12 +16,19 @@ export interface PingCompletedEvent {
 }
 
 export interface IncidentAlertEvent {
+  incidentId: string;
   monitorId: string;
   userId: string;
   status: 'ongoing' | 'resolved';
   startedAt: string;
   resolvedAt?: string;
-  summary?: string;
+  errorMessage?: string;
+  aiPostMortem?: {
+    summary: string;
+    rootCause: string;
+    actionItems: string[];
+    generatedAt: string;
+  };
 }
 
 // Global application event bus facilitating decoupled communication across modules
