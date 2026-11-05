@@ -10,28 +10,35 @@ Mô-đun Incidents đóng vai trò là "trung tâm phản ứng sự cố" (Inci
 
 ```mermaid
 flowchart TD
-    subgraph DetectionLayer ["1. Detection & Verification Layer"]
+    subgraph DetectionLayer ["1. Detection & Verification Layer (Ping Engine)"]
         Ping["Ping Engine (Worker)<br>executeSingleProbe()"] -->|Lỗi lần 1| FastRetest["Sleep 2s & Retest lần 2<br>(Chống báo động giả)"]
         FastRetest -->|Vẫn lỗi: isUp = false| EmitPingFail["eventBus.emitPingCompleted(<br>{ isUp: false, error: 'HTTP 502' })"]
         FastRetest -->|Thành công: isUp = true| EmitPingUp["eventBus.emitPingCompleted(<br>{ isUp: true })"]
     end
 
-    subgraph IncidentCore ["2. Incident Service & State Machine"]
-        EmitPingFail --> CheckOngoing{"Đã có sự cố<br>status = 'ongoing'?"}
-        CheckOngoing -- "Đã có" --> SkipCreate["Bỏ qua (Chống duplicate ticket)"]
-        CheckOngoing -- "Chưa có" --> CreateInc["Tạo mới Incident (DB)<br>status: 'ongoing'<br>startedAt: now"]
-
-        EmitPingUp --> CheckRecover{"Đang có sự cố<br>status = 'ongoing'?"}
-        CheckRecover -- "Có sự cố" --> ResolveInc["Cập nhật Incident (DB)<br>status: 'resolved'<br>resolvedAt: now<br>Tính Downtime"]
+    subgraph EventBusLayer ["2. Internal In-Process EventBus"]
+        EmitPingFail -->|Phát sự kiện PING_COMPLETED| BusHub{"EventBus<br>(EventEmitter)"}
+        EmitPingUp -->|Phát sự kiện PING_COMPLETED| BusHub
+        BusHub -->|eventBus.onPingCompleted| OnPingListener["IncidentService<br>handlePingCompleted(payload)"]
     end
 
-    subgraph Phase1Alert ["3. Phase 1: Outage Broadcast (Immediate)"]
+    subgraph IncidentCore ["3. Incident Service & State Machine (RAM MemoryCache)"]
+        OnPingListener -->|payload.isUp == false| CheckOngoing{"memoryCache.has(<br>'ongoing_incident:id')"}
+        CheckOngoing -- "Đã có" --> SkipCreate["Bỏ qua: O(1) RAM<br>(0 query DB, chống trùng ticket)"]
+        CheckOngoing -- "Chưa có" --> CreateInc["Tạo mới Incident (DB)<br>Lưu vào memoryCache (TTL=0)<br>startedAt: now"]
+
+        OnPingListener -->|payload.isUp == true| CheckRecover{"memoryCache.get(<br>'ongoing_incident:id')"}
+        CheckRecover -- "Có ID" --> ResolveInc["Cập nhật Incident theo ID (DB)<br>Xóa khỏi memoryCache<br>Tính Downtime"]
+        CheckRecover -- "null" --> SkipRecover["Bỏ qua: O(1) RAM<br>(0 query DB, Target bình thường)"]
+    end
+
+    subgraph Phase1Alert ["4. Phase 1: Outage Broadcast (Immediate)"]
         CreateInc --> EmitAlert1["eventBus.emitIncidentAlert(<br>{ status: 'ongoing', errorMessage, aiPostMortem: null })"]
         EmitAlert1 --> SSE1["Module 4: Realtime SSE"]
         SSE1 --> FE1["Frontend Dashboard UI<br>• Target Badge: ĐỔI MÀU ĐỎ<br>• Khung AI: LOADING SKELETON"]
     end
 
-    subgraph AIWorkerLayer ["4. Background AI Task Queue (Concurrency = 2)"]
+    subgraph AIWorkerLayer ["5. Background AI Task Queue (Concurrency = 2)"]
         CreateInc --> PushAI["aiService.queueIncidentAnalysis(task)"]
         PushAI --> AIQueue["aiService.queue (async.queue, concurrency=2)"]
         AIQueue --> ProviderSelect{"AI_PROVIDER"}
@@ -41,7 +48,7 @@ flowchart TD
         Gemini --> SaveAI
     end
 
-    subgraph Phase2Alert ["5. Phase 2: Post-Mortem & Email Broadcast"]
+    subgraph Phase2Alert ["6. Phase 2: Post-Mortem & Email Broadcast"]
         SaveAI --> EmitAlert2["eventBus.emitIncidentAlert(<br>{ status: 'ongoing', aiPostMortem: {...} })"]
         EmitAlert2 --> SSE2["Module 4: Realtime SSE"]
         SSE2 --> FE2["Frontend Dashboard UI<br>• Tắt Skeleton<br>• Hiển thị 3 thẻ AI Report"]
@@ -50,7 +57,7 @@ flowchart TD
         EmailQueue --> SMTP["SMTP Server (Nodemailer)<br>Gửi email cảnh báo kèm tóm tắt AI"]
     end
 
-    subgraph RecoveryAlert ["6. Phase 3: Service Recovery Alert"]
+    subgraph RecoveryAlert ["7. Phase 3: Service Recovery Alert"]
         ResolveInc --> EmitRecover["eventBus.emitIncidentAlert(<br>{ status: 'resolved', resolvedAt })"]
         EmitRecover --> SSERecover["Module 4: Realtime SSE"]
         SSERecover --> FERecover["Frontend Dashboard UI<br>• Target Badge: ĐỔI MÀU XANH<br>• Chuyển tab Incidents sang Resolved"]
@@ -158,18 +165,55 @@ eventBus.emitPingCompleted({
 
 ---
 
-### Bước 2: Nhận Diện Sự Cố Duy Nhất & Tạo Bản Ghi (Idempotent Outage Detection)
-Tại [`src/services/incidentService.ts`](../backend/src/services/incidentService.ts), hệ thống lắng nghe sự kiện `PING_COMPLETED`.
+### Bước 2: Lắng Nghe Sự Kiện PingCompleted & Điều Phối Xử Lý (Event Subscription & Dispatcher)
+Tại [`src/services/incidentService.ts`](../backend/src/services/incidentService.ts), service đăng ký lắng nghe sự kiện `PING_COMPLETED` từ EventBus và làm ấm RAM cache ngay khi khởi tạo:
 
-Để ngăn chặn việc **tạo hàng chục ticket trùng lặp** khi website bị sập liên tục trong nhiều chu kỳ 30 giây:
+```typescript
+// File: src/services/incidentService.ts
+constructor() {
+  this.registerEventBusListeners();
+}
+
+// 1. Nạp các sự cố đang dang dở từ DB vào RAM lúc server khởi động (Cache Warm-up)
+async init(): Promise<void> {
+  const ongoingIncidents = await incidentRepository.findOngoing();
+  for (const incident of ongoingIncidents) {
+    memoryCache.set(
+      `${ONGOING_INCIDENT_CACHE_PREFIX}${incident.monitorId.toString()}`,
+      incident._id.toString(),
+      0
+    );
+  }
+}
+
+// 2. Đăng ký listener nhận sự kiện PING_COMPLETED phát ra từ PingEngine
+private registerEventBusListeners(): void {
+  eventBus.onPingCompleted(async (payload: PingCompletedEvent) => {
+    await this.handlePingCompleted(payload);
+  });
+}
+
+// 3. Bộ điều phối trung tâm: phân luồng theo kết quả kiểm tra
+async handlePingCompleted(payload: PingCompletedEvent): Promise<void> {
+  if (!payload.isUp) {
+    // Nhánh THẤT BẠI: tạo sự cố mới hoặc bỏ qua nếu đã có trong memoryCache
+    await this.handleTargetFailure(payload);
+  } else {
+    // Nhánh THÀNH CÔNG: đóng sự cố nếu đang có trong memoryCache, hoặc bỏ qua nếu bình thường
+    await this.handleTargetRecovery(payload);
+  }
+}
+```
+
+Tiếp theo, khi phân luồng vào nhánh lỗi `handleTargetFailure`, để triệt tiêu toàn bộ chi phí truy vấn database lặp lại vô nghĩa và ngăn chặn việc **tạo hàng chục ticket trùng lặp** khi website bị sập liên tục:
 
 ```typescript
 // File: src/services/incidentService.ts
 private async handleTargetFailure(payload: PingCompletedEvent): Promise<void> {
-  // 1. Kiểm tra xem monitor này đã có ticket nào đang 'ongoing' chưa
-  const existingOngoing = await incidentRepository.findOngoingByMonitor(payload.monitorId);
-  if (existingOngoing) {
-    // Đã có sự cố đang mở -> Bỏ qua, không tạo thêm bản ghi mới
+  const cacheKey = `${ONGOING_INCIDENT_CACHE_PREFIX}${payload.monitorId}`;
+  
+  // 1. Kiểm tra trạng thái sập trong RAM qua memoryCache: O(1) time complexity, 0 query DB
+  if (memoryCache.has(cacheKey)) {
     return;
   }
 
@@ -193,7 +237,10 @@ private async handleTargetFailure(payload: PingCompletedEvent): Promise<void> {
     },
   });
 
-  // 3. Pha 1: Bắn ngay thông báo sập mạng lên Dashboard qua SSE (aiPostMortem = undefined)
+  // 3. Lưu incidentId vào memoryCache với TTL = 0 (vô thời hạn cho tới khi phục hồi)
+  memoryCache.set(cacheKey, incident._id.toString(), 0);
+
+  // 4. Pha 1: Bắn ngay thông báo sập mạng lên Dashboard qua SSE (aiPostMortem = undefined)
   eventBus.emitIncidentAlert({
     incidentId: incident._id.toString(),
     monitorId: payload.monitorId,
@@ -203,7 +250,7 @@ private async handleTargetFailure(payload: PingCompletedEvent): Promise<void> {
     errorMessage: payload.error,
   });
 
-  // 4. Đẩy tác vụ chẩn đoán AI vào hàng đợi xử lý nền (KHÔNG CẦN CALLBACK)
+  // 5. Đẩy tác vụ chẩn đoán AI vào hàng đợi xử lý nền (concurrency = 2)
   aiService.queueIncidentAnalysis({
     incidentId: incident._id.toString(),
     monitorId: monitor._id.toString(),
@@ -335,47 +382,54 @@ Gói tin SSE gửi xuống ở Pha 2:
 ---
 
 ### Bước 6: Phục Hồi Sự Cố Tự Động (Self-Healing Incident Resolution)
-Khi mục tiêu sống lại (`isUp: true`), [`incidentService.ts`](../backend/src/services/incidentService.ts) tự động đóng vòng đời sự cố:
+Khi mục tiêu sống lại (`isUp: true`), [`incidentService.ts`](../backend/src/services/incidentService.ts) kiểm tra nhanh qua `memoryCache` và đóng vòng đời sự cố:
 
 ```typescript
 // File: src/services/incidentService.ts
 private async handleTargetRecovery(payload: PingCompletedEvent): Promise<void> {
-  const ongoingIncident = await incidentRepository.findOngoingByMonitor(payload.monitorId);
-  if (!ongoingIncident) return;
+  const cacheKey = `${ONGOING_INCIDENT_CACHE_PREFIX}${payload.monitorId}`;
+  
+  // 1. Kiểm tra RAM cache: O(1), nếu không có incident mở -> THOÁT NGAY LẬP TỨC (0 query DB!)
+  const ongoingIncidentId = memoryCache.get<string>(cacheKey);
+  if (!ongoingIncidentId) return;
 
   const resolvedDate = new Date(payload.timestamp);
 
-  // 1. Cập nhật trạng thái sự cố sang 'resolved' và lưu mốc thời gian kết thúc
+  // 2. Cập nhật trực tiếp theo incidentId lấy từ cache và lưu mốc thời gian kết thúc
   const resolvedIncident = await incidentRepository.resolveIncident(
-    ongoingIncident._id.toString(),
+    ongoingIncidentId,
     resolvedDate
   );
+
+  // 3. Xóa sự cố khỏi RAM cache
+  memoryCache.del(cacheKey);
+
   if (!resolvedIncident) return;
 
-  // 2. Phát sự kiện phục hồi lên SSE Dashboard
+  // 4. Phát sự kiện phục hồi lên SSE Dashboard
   eventBus.emitIncidentAlert({
-    incidentId: ongoingIncident._id.toString(),
+    incidentId: resolvedIncident._id.toString(),
     monitorId: payload.monitorId,
     userId: payload.userId,
     status: 'resolved',
-    startedAt: ongoingIncident.startedAt.toISOString(),
+    startedAt: resolvedIncident.startedAt.toISOString(),
     resolvedAt: payload.timestamp,
   });
 
-  // 3. Tính toán tổng thời lượng downtime chính xác (ví dụ: '14 minutes', '1 hour 25 min')
+  // 5. Tính toán tổng thời lượng downtime chính xác (ví dụ: '14 minutes', '1 hour 25 min')
   const monitor = await monitorRepository.findById(payload.monitorId);
   const user = await userRepository.findById(payload.userId);
 
   if (monitor && user) {
-    const durationMs = resolvedDate.getTime() - ongoingIncident.startedAt.getTime();
+    const durationMs = resolvedDate.getTime() - resolvedIncident.startedAt.getTime();
     const downtimeDuration = this.formatDuration(durationMs);
 
-    // 4. Gửi email thông báo hệ thống đã phục hồi bình thường
+    // 6. Gửi email thông báo hệ thống đã phục hồi bình thường
     emailService.sendIncidentResolvedEmail(
       user.email,
       monitor.name,
       monitor.url,
-      ongoingIncident.startedAt.toISOString(),
+      resolvedIncident.startedAt.toISOString(),
       resolvedDate.toISOString(),
       downtimeDuration
     );
@@ -495,3 +549,4 @@ POST   /api/incidents/:id/reanalyze      -> Kích hoạt AI phân tích lại kh
 ```
 
 * **Chống IDOR / BOLA (OWASP API Security):** Mọi câu truy vấn đều kẹp cứng `userId`: `incidentRepository.findByIdAndUser(id, req.user.id)`. Nếu User A cố tình gửi request với ID của User B, hệ thống trả về **`HTTP 404 Not Found` (Anti-Enumeration)** thay vì 403, che giấu hoàn toàn sự tồn tại của tài nguyên để chống tấn công vét cạn.
+

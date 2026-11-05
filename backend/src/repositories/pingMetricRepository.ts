@@ -17,7 +17,7 @@ export class PingMetricRepository extends BaseRepository<IPingMetric> {
       insertOne: {
         document: {
           timestamp: metric.timestamp,
-          monitorId: typeof metric.monitorId === 'string' ? new Types.ObjectId(metric.monitorId) : metric.monitorId,
+          monitorId: metric.monitorId,
           statusCode: metric.statusCode,
           latency: metric.latency,
           isUp: metric.isUp,
@@ -37,6 +37,19 @@ export class PingMetricRepository extends BaseRepository<IPingMetric> {
       .sort({ timestamp: -1 })
       .limit(limit)
       .exec();
+  }
+
+  // Delete all metrics associated with a specific monitor
+  async deleteByMonitor(monitorId: string): Promise<number> {
+    const result = await this.model.deleteMany({ monitorId: new Types.ObjectId(monitorId) }).exec();
+    return result.deletedCount || 0;
+  }
+
+  // Delete all metrics associated with a list of monitors
+  async deleteByMonitors(monitorIds: Types.ObjectId[]): Promise<number> {
+    if (monitorIds.length === 0) return 0;
+    const result = await this.model.deleteMany({ monitorId: { $in: monitorIds } }).exec();
+    return result.deletedCount || 0;
   }
 }
 

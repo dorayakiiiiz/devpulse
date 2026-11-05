@@ -3,11 +3,14 @@ import { env } from './config/env.js';
 import { connectDatabase, disconnectDatabase } from './config/db.js';
 import { pingEngine } from './services/pingEngine.js';
 import { realtimeService } from './services/realtimeService.js';
-import './services/incidentService.js';
+import { incidentService } from './services/incidentService.js';
 
 // Bootstrap backend server and handle lifecycle
 async function bootstrap(): Promise<void> {
   await connectDatabase();
+
+  // Warm in-memory cache with active ongoing incidents before accepting probes
+  await incidentService.init();
 
   // Start periodic ping engine schedulers and metric buffer flush timer
   pingEngine.start();

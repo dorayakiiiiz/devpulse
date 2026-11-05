@@ -24,7 +24,7 @@ Cung cấp cơ chế xác thực và quản lý tài khoản an toàn cho nền 
 - Đăng xuất và xóa bỏ Refresh Token Cookie tại trình duyệt.
 - Lấy thông tin tài khoản hiện tại từ phiên đăng nhập.
 - Yêu cầu mã OTP qua email để khôi phục mật khẩu.
-- Áp dụng rate limiting theo IP và cooldown 60 giây theo email cho yêu cầu OTP.
+- Áp dụng rate limiting theo IP cho xác thực (`authLimiter`: tối đa 20 yêu cầu / 15 phút cho `/register` và `/login`) và cho yêu cầu OTP (`otpIpLimiter`: tối đa 10 yêu cầu / 15 phút, kèm cooldown 60 giây theo email).
 - Xác thực mã OTP và cập nhật mật khẩu mới.
 
 **Ngoài scope:**

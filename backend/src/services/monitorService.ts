@@ -1,5 +1,7 @@
 import { Types } from 'mongoose';
 import { monitorRepository } from '../repositories/monitorRepository.js';
+import { incidentRepository } from '../repositories/incidentRepository.js';
+import { pingMetricRepository } from '../repositories/pingMetricRepository.js';
 import { IMonitor, HttpMethod, MonitorStatus, ISslInfo } from '../models/monitorModel.js';
 import { checkSslCertificate } from '../utils/sslChecker.js';
 import { memoryCache } from '../utils/cache.js';
@@ -134,12 +136,18 @@ export class MonitorService {
     return this.mapToDto(monitor);
   }
 
-  // Delete a monitor permanently using a single atomic scoped query
+  // Delete a monitor permanently and cascade delete related incidents, metrics, and cache
   async deleteMonitor(userId: string, monitorId: string): Promise<void> {
     const deleted = await monitorRepository.deleteByIdAndUser(monitorId, userId);
     if (!deleted) {
       throw new AppError('Monitor not found', 404);
     }
+    memoryCache.del(`ongoing_incident:${monitorId}`);
+    memoryCache.del(`ping_cooldown:${monitorId}`);
+
+    // Cascade delete orphan incidents and time-series metrics
+    await incidentRepository.deleteByMonitor(monitorId);
+    await pingMetricRepository.deleteByMonitor(monitorId);
   }
 
   // Execute an instant on-demand ping verification subject to cooldown and rate limiting

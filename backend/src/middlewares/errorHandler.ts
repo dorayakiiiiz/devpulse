@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
+import { env } from '../config/env.js';
 import { AppError } from '../utils/appError.js';
 import { sendError } from '../utils/response.js';
 
@@ -19,5 +20,6 @@ export function errorHandler(
   }
 
   console.error('[Unhandled Error]', err);
-  return sendError(res, err.message || 'Internal server error', 500);
+  const message = env.NODE_ENV === 'production' ? 'Internal server error' : (err.message || 'Internal server error');
+  return sendError(res, message, 500);
 }

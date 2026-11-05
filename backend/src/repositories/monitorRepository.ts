@@ -34,6 +34,12 @@ export class MonitorRepository extends BaseRepository<IMonitor> {
     return this.model.findOneAndDelete({ _id: new Types.ObjectId(id), userId: new Types.ObjectId(userId) }).exec();
   }
 
+  // Delete all monitors belonging to a specific user
+  async deleteByUser(userId: string): Promise<number> {
+    const result = await this.model.deleteMany({ userId: new Types.ObjectId(userId) }).exec();
+    return result.deletedCount || 0;
+  }
+
   // Retrieve active monitors matching a designated execution interval
   async findActiveByInterval(interval: number): Promise<IMonitor[]> {
     return this.model.find({ isActive: true, interval }).exec();

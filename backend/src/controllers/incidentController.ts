@@ -1,11 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import { incidentService } from '../services/incidentService.js';
+import { IncidentFilterOptions } from '../repositories/incidentRepository.js';
 import { sendSuccess } from '../utils/response.js';
 
 // Retrieve paginated incidents belonging to current authenticated user
 export async function getIncidents(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const incidents = await incidentService.getIncidents(req.user!.id, req.query as any);
+    const incidents = await incidentService.getIncidents(req.user!.id, req.query as IncidentFilterOptions);
     sendSuccess(res, incidents);
   } catch (error) {
     next(error);

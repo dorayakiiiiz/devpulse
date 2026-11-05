@@ -12,7 +12,7 @@ export interface IPingMetric extends Document {
 
 export interface CreatePingMetricDto {
   timestamp: Date;
-  monitorId: string | Types.ObjectId;
+  monitorId: Types.ObjectId;
   statusCode: number;
   latency: number;
   isUp: boolean;

@@ -1,5 +1,9 @@
 import bcrypt from 'bcryptjs';
 import { userRepository } from '../repositories/userRepository.js';
+import { monitorRepository } from '../repositories/monitorRepository.js';
+import { incidentRepository } from '../repositories/incidentRepository.js';
+import { pingMetricRepository } from '../repositories/pingMetricRepository.js';
+import { memoryCache } from '../utils/cache.js';
 import { AppError } from '../utils/appError.js';
 import { IUser } from '../models/userModel.js';
 import { AuthUserDto } from './authService.js';
@@ -54,7 +58,7 @@ export class UserService {
     await userRepository.incrementTokenVersion(userId);
   }
 
-  // Confirm password and delete user account permanently
+  // Confirm password and delete user account permanently with cascade resource cleanup
   async deleteAccount(userId: string, password: string): Promise<void> {
     const user = await userRepository.findById(userId);
     if (!user) {
@@ -65,8 +69,19 @@ export class UserService {
     if (!isMatch) {
       throw new AppError('Incorrect password. Account deletion aborted.', 400);
     }
-    
-    // TODO: Delete all data related to user
+
+    // Retrieve monitors to evict memory caches and remove associated time-series metrics
+    const monitors = await monitorRepository.findByUser(userId);
+    for (const monitor of monitors) {
+      const monitorIdStr = monitor._id.toString();
+      memoryCache.del(`ongoing_incident:${monitorIdStr}`);
+      memoryCache.del(`ping_cooldown:${monitorIdStr}`);
+    }
+
+    const monitorIds = monitors.map((m) => m._id);
+    await pingMetricRepository.deleteByMonitors(monitorIds);
+    await incidentRepository.deleteByUser(userId);
+    await monitorRepository.deleteByUser(userId);
     await userRepository.deleteById(userId);
   }
 

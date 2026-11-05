@@ -1,11 +1,21 @@
+import { Types } from 'mongoose';
 import { incidentRepository, IncidentFilterOptions } from '../repositories/incidentRepository.js';
 import { monitorRepository } from '../repositories/monitorRepository.js';
 import { userRepository } from '../repositories/userRepository.js';
 import { aiService } from './aiService.js';
 import { emailService } from './emailService.js';
 import { eventBus, PingCompletedEvent } from '../utils/eventBus.js';
+import { memoryCache } from '../utils/cache.js';
 import { IIncident, IncidentStatus } from '../models/incidentModel.js';
+import { IMonitor } from '../models/monitorModel.js';
 import { AppError } from '../utils/appError.js';
+
+// Type guard identifying populated monitor documents safely without loose casting
+function isPopulatedMonitor(monitor: Types.ObjectId | IMonitor): monitor is IMonitor {
+  return typeof monitor === 'object' && monitor !== null && 'name' in monitor;
+}
+
+const ONGOING_INCIDENT_CACHE_PREFIX = 'ongoing_incident:';
 
 export interface IncidentResponseDto {
   id: string;
@@ -37,6 +47,18 @@ export class IncidentService {
     this.registerEventBusListeners();
   }
 
+  // Warm in-memory cache with ongoing incidents from database on startup
+  async init(): Promise<void> {
+    const ongoingIncidents = await incidentRepository.findOngoing();
+    for (const incident of ongoingIncidents) {
+      memoryCache.set(
+        `${ONGOING_INCIDENT_CACHE_PREFIX}${incident.monitorId.toString()}`,
+        incident._id.toString(),
+        0
+      );
+    }
+  }
+
   // Subscribe to internal PingCompleted events from Ping Engine
   private registerEventBusListeners(): void {
     eventBus.onPingCompleted(async (payload: PingCompletedEvent) => {
@@ -53,10 +75,10 @@ export class IncidentService {
     }
   }
 
-  // Handle failed probe: create new ongoing incident if none exists
+  // Handle failed probe: create new ongoing incident if none exists in cache
   private async handleTargetFailure(payload: PingCompletedEvent): Promise<void> {
-    const existingOngoing = await incidentRepository.findOngoingByMonitor(payload.monitorId);
-    if (existingOngoing) {
+    const cacheKey = `${ONGOING_INCIDENT_CACHE_PREFIX}${payload.monitorId}`;
+    if (memoryCache.has(cacheKey)) {
       return;
     }
 
@@ -76,9 +98,12 @@ export class IncidentService {
         statusCode: payload.statusCode,
         errorMessage: payload.error || 'Health check probe failed',
         responseBody: '',
-        responseHeaders: {},
+        responseHeaders: new Map(),
       },
     });
+
+    // Cache ongoing incident id indefinitely until resolved (TTL = 0)
+    memoryCache.set(cacheKey, incident._id.toString(), 0);
 
     // Broadcast initial failure alert immediately so dashboard reflects outage with pending AI state
     eventBus.emitIncidentAlert({
@@ -103,29 +128,33 @@ export class IncidentService {
     });
   }
 
-  // Handle successful probe: resolve ongoing incident if one exists
+  // Handle successful probe: resolve ongoing incident if one exists in cache
   private async handleTargetRecovery(payload: PingCompletedEvent): Promise<void> {
-    const ongoingIncident = await incidentRepository.findOngoingByMonitor(payload.monitorId);
-    if (!ongoingIncident) {
+    const cacheKey = `${ONGOING_INCIDENT_CACHE_PREFIX}${payload.monitorId}`;
+    const ongoingIncidentId = memoryCache.get<string>(cacheKey);
+    if (!ongoingIncidentId) {
       return;
     }
 
     const resolvedDate = new Date(payload.timestamp);
     const resolvedIncident = await incidentRepository.resolveIncident(
-      ongoingIncident._id.toString(),
+      ongoingIncidentId,
       resolvedDate
     );
+
+    // Evict ongoing incident from memory cache
+    memoryCache.del(cacheKey);
 
     if (!resolvedIncident) {
       return;
     }
 
     eventBus.emitIncidentAlert({
-      incidentId: ongoingIncident._id.toString(),
+      incidentId: resolvedIncident._id.toString(),
       monitorId: payload.monitorId,
       userId: payload.userId,
       status: 'resolved',
-      startedAt: ongoingIncident.startedAt.toISOString(),
+      startedAt: resolvedIncident.startedAt.toISOString(),
       resolvedAt: payload.timestamp,
     });
 
@@ -133,14 +162,14 @@ export class IncidentService {
     const user = await userRepository.findById(payload.userId);
 
     if (monitor && user) {
-      const durationMs = resolvedDate.getTime() - ongoingIncident.startedAt.getTime();
+      const durationMs = resolvedDate.getTime() - resolvedIncident.startedAt.getTime();
       const downtimeDuration = this.formatDuration(durationMs);
 
       emailService.sendIncidentResolvedEmail(
         user.email,
         monitor.name,
         monitor.url,
-        ongoingIncident.startedAt.toISOString(),
+        resolvedIncident.startedAt.toISOString(),
         resolvedDate.toISOString(),
         downtimeDuration
       );
@@ -188,6 +217,10 @@ export class IncidentService {
     if (!updated) {
       throw new AppError('Failed to resolve incident', 500);
     }
+
+    // Evict ongoing incident from memory cache so subsequent failures can register new incidents
+    const cacheKey = `${ONGOING_INCIDENT_CACHE_PREFIX}${incident.monitorId}`;
+    memoryCache.del(cacheKey);
 
     eventBus.emitIncidentAlert({
       incidentId: incident._id.toString(),
@@ -274,13 +307,21 @@ export class IncidentService {
 
   // Format database document to client DTO representation
   private mapToDto(incident: IIncident): IncidentResponseDto {
-    const monitor = incident.monitorId as unknown as { _id?: unknown; name?: string; url?: string };
+    let monitorId = incident.monitorId.toString();
+    let monitorName = 'Unknown Target';
+    let monitorUrl = '';
+
+    if (isPopulatedMonitor(incident.monitorId)) {
+      monitorId = incident.monitorId._id.toString();
+      monitorName = incident.monitorId.name;
+      monitorUrl = incident.monitorId.url;
+    }
 
     return {
       id: incident._id.toString(),
-      monitorId: monitor._id ? monitor._id.toString() : incident.monitorId.toString(),
-      monitorName: monitor.name || 'Unknown Target',
-      monitorUrl: monitor.url || '',
+      monitorId,
+      monitorName,
+      monitorUrl,
       status: incident.status,
       startedAt: incident.startedAt.toISOString(),
       resolvedAt: incident.resolvedAt ? incident.resolvedAt.toISOString() : null,
@@ -288,9 +329,7 @@ export class IncidentService {
         statusCode: incident.errorDetails.statusCode,
         errorMessage: incident.errorDetails.errorMessage,
         responseBody: incident.errorDetails.responseBody,
-        responseHeaders: incident.errorDetails.responseHeaders instanceof Map
-          ? Object.fromEntries(incident.errorDetails.responseHeaders)
-          : (incident.errorDetails.responseHeaders as Record<string, string>) || {},
+        responseHeaders: Object.fromEntries(incident.errorDetails.responseHeaders),
       },
       aiPostMortem: incident.aiPostMortem
         ? {

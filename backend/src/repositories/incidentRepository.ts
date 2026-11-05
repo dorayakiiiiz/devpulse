@@ -25,6 +25,11 @@ export class IncidentRepository extends BaseRepository<IIncident> {
       .exec();
   }
 
+  // Find all active ongoing incidents across all monitors for cache warming on startup
+  async findOngoing(): Promise<IIncident[]> {
+    return this.model.find({ status: 'ongoing' }).exec();
+  }
+
   // Find incidents scoped to user with optional status or monitor filter
   async findByUser(userId: string, options: IncidentFilterOptions = {}): Promise<IIncident[]> {
     const query: FilterQuery<IIncident> = {
@@ -69,6 +74,7 @@ export class IncidentRepository extends BaseRepository<IIncident> {
         monitorId: new Types.ObjectId(monitorId),
         userId: new Types.ObjectId(userId),
       })
+      .populate('monitorId', 'name url')
       .sort({ createdAt: -1 })
       .limit(limit)
       .exec();
@@ -80,9 +86,22 @@ export class IncidentRepository extends BaseRepository<IIncident> {
       .find({
         monitorId: new Types.ObjectId(monitorId),
       })
+      .populate('monitorId', 'name url')
       .sort({ createdAt: -1 })
       .limit(limit)
       .exec();
+  }
+
+  // Delete all incidents associated with a target monitor
+  async deleteByMonitor(monitorId: string): Promise<number> {
+    const result = await this.model.deleteMany({ monitorId: new Types.ObjectId(monitorId) }).exec();
+    return result.deletedCount || 0;
+  }
+
+  // Delete all incidents associated with a user
+  async deleteByUser(userId: string): Promise<number> {
+    const result = await this.model.deleteMany({ userId: new Types.ObjectId(userId) }).exec();
+    return result.deletedCount || 0;
   }
 
   // Atomically mark incident resolved with recovery timestamp

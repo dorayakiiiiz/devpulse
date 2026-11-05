@@ -1,10 +1,11 @@
 import { Schema, model, Document, Types } from 'mongoose';
+import { IMonitor } from './monitorModel.js';
 
 export type IncidentStatus = 'ongoing' | 'resolved';
 
 export interface IErrorDetails {
   statusCode: number;
-  responseHeaders: Record<string, string>;
+  responseHeaders: Map<string, string>;
   responseBody: string;
   errorMessage: string;
 }
@@ -18,7 +19,7 @@ export interface IAiPostMortem {
 
 export interface IIncident extends Document {
   _id: Types.ObjectId;
-  monitorId: Types.ObjectId;
+  monitorId: Types.ObjectId | IMonitor;
   userId: Types.ObjectId;
   status: IncidentStatus;
   startedAt: Date;

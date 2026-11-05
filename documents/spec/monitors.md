@@ -63,7 +63,7 @@ Cung cấp khả năng quản lý cấu hình các mục tiêu giám sát cho ng
 ### 4.3. Delete Monitor Flow
 1. Người dùng gửi yêu cầu xóa mục tiêu theo định danh `_id`.
 2. Hệ thống kiểm tra quyền sở hữu bản ghi dựa trên `userId`.
-3. Nếu hợp lệ: Hệ thống xóa bản ghi khỏi collection `monitors`.
+3. Nếu hợp lệ: Hệ thống xóa bản ghi khỏi collection `monitors`, đồng thời xóa phân tầng (cascade delete) toàn bộ các bản ghi `incidents` và `ping_metrics` liên quan của mục tiêu đó, dọn dẹp các khóa cache trên RAM (`ongoing_incident:${id}`, `ping_cooldown:${id}`).
 4. Hệ thống trả về thông báo xóa thành công với mã HTTP 200.
 
 ### 4.4. Trigger Instant Ping Flow

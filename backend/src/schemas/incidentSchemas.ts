@@ -20,3 +20,5 @@ export const queryIncidentsSchema = z.object({
       .transform((val) => (val ? parseInt(val, 10) : 0)),
   }),
 });
+
+export type QueryIncidentsQuery = z.infer<typeof queryIncidentsSchema>['query'];

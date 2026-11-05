@@ -12,7 +12,7 @@ import {
 } from '../controllers/authController.js';
 import { validateRequest } from '../middlewares/validateRequest.js';
 import { authenticate } from '../middlewares/authMiddleware.js';
-import { otpIpLimiter } from '../middlewares/rateLimitMiddleware.js';
+import { authLimiter, otpIpLimiter } from '../middlewares/rateLimitMiddleware.js';
 import {
   registerSchema,
   verifyEmailSchema,
@@ -25,7 +25,7 @@ import {
 const router = Router();
 
 // Registration initiation route with verification OTP dispatch
-router.post('/register', validateRequest(registerSchema), register);
+router.post('/register', authLimiter, validateRequest(registerSchema), register);
 
 // Email verification confirmation and account activation route
 router.post('/verify-email', validateRequest(verifyEmailSchema), verifyEmail);
@@ -34,7 +34,7 @@ router.post('/verify-email', validateRequest(verifyEmailSchema), verifyEmail);
 router.post('/resend-verification', otpIpLimiter, validateRequest(resendVerificationSchema), resendVerification);
 
 // Public authentication login route
-router.post('/login', validateRequest(loginSchema), login);
+router.post('/login', authLimiter, validateRequest(loginSchema), login);
 
 // Token rotation and session renewal route
 router.post('/refresh-token', refreshAccessToken);

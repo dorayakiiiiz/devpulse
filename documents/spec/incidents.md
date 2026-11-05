@@ -46,21 +46,21 @@ Tự động phát hiện và quản lý vòng đời các sự cố gián đo�
 
 ### 4.1. Incident Detection and AI Analysis Flow
 1. Mô-đun Ping Engine hoàn tất lượt kiểm tra và xác nhận mục tiêu thất bại `isUp: false` sau khi đã thử lại.
-2. Dịch vụ sự cố kiểm tra trong collection `incidents` xem mục tiêu này đã có sự cố nào đang ở trạng thái `ongoing` hay chưa.
+2. Dịch vụ sự cố kiểm tra trong bộ nhớ đệm RAM `memoryCache` (khóa `ongoing_incident:${monitorId}`) xem mục tiêu này đã có sự cố nào đang ở trạng thái `ongoing` hay chưa để loại bỏ hoàn toàn các truy vấn lặp lại vào MongoDB.
 3. Nếu chưa có:
    - Tạo bản ghi mới trong `incidents` với `status: 'ongoing'`, `startedAt` là thời điểm hiện tại và lưu trữ toàn bộ dữ liệu lỗi thô trong `errorDetails`.
-   - Bắn sự kiện nội bộ `INCIDENT_ALERT` để đẩy thông báo lên Dashboard thời gian thực và xóa khóa bộ nhớ đệm trang trạng thái công khai.
-   - Đẩy tác vụ phân tích trí tuệ nhân tạo và tác vụ gửi thư điện tử vào In-Memory Task Queue xử lý ngầm.
-4. Tác vụ nền gửi dữ liệu lỗi thô đến LLM API kèm câu lệnh định hướng chuyên gia vận hành hệ thống.
+   - Lưu `incidentId` vào `memoryCache` với thời gian sống vô hạn (`TTL = 0`) để theo dõi trạng thái tức thời.
+   - Bắn sự kiện nội bộ `INCIDENT_ALERT` (Pha 1) để đẩy thông báo lên Dashboard thời gian thực và kích hoạt trạng thái chờ phân tích AI.
+   - Đẩy tác vụ phân tích trí tuệ nhân tạo vào In-Memory Task Queue (`async.queue` với concurrency = 2) xử lý ngầm.
+4. Tác vụ nền gửi dữ liệu lỗi thô đến LLM API (hỗ trợ kiến trúc OOP đa nhà cung cấp: Groq LLaMA 3.3 70B hoặc Gemini 1.5 Flash) kèm câu lệnh định hướng chuyên gia SRE.
 5. Mô hình ngôn ngữ trả về kết quả định dạng JSON gồm tóm tắt hiện tượng, nguyên nhân tiềm tàng và các đầu việc cần làm.
-6. Hệ thống cập nhật kết quả vào trường `aiPostMortem` của bản ghi sự cố.
-7. Hệ thống định dạng nội dung thư điện tử và thực thi gửi cảnh báo qua cổng SMTP đến người quản trị mục tiêu.
+6. Hệ thống cập nhật kết quả vào trường `aiPostMortem` của bản ghi sự cố, phát sự kiện `INCIDENT_ALERT` (Pha 2) cập nhật Dashboard và gửi email cảnh báo qua cổng SMTP.
 
 ### 4.2. Incident Resolution Flow
 1. Mô-đun Ping Engine kiểm tra mục tiêu đạt kết quả thành công `isUp: true`.
-2. Dịch vụ sự cố kiểm tra và phát hiện có bản ghi sự cố đang ở trạng thái `ongoing` của mục tiêu đó.
-3. Hệ thống cập nhật bản ghi: thiết lập `status: 'resolved'` và ghi nhận mốc thời gian phục hồi `resolvedAt`.
-4. Kích hoạt tác vụ nền gửi thư điện tử thông báo dịch vụ đã hoạt động bình thường trở lại kèm thời lượng gián đoạn.
+2. Dịch vụ sự cố kiểm tra `memoryCache` xem có `incidentId` đang ở trạng thái `ongoing` của mục tiêu đó hay không (độ phức tạp $O(1)$ trên RAM, nếu không có thì thoát ngay lập tức với 0 truy vấn database).
+3. Nếu có, hệ thống cập nhật bản ghi trực tiếp theo ID trong cơ sở dữ liệu: thiết lập `status: 'resolved'`, ghi nhận mốc thời gian phục hồi `resolvedAt`, và xóa khóa khỏi `memoryCache`.
+4. Kích hoạt tác vụ nền gửi thư điện tử thông báo dịch vụ đã hoạt động bình thường trở lại kèm thời lượng gián đoạn chính xác.
 5. Bắn sự kiện nội bộ báo hiệu sự cố đã kết thúc để giao diện đổi màu biểu tượng sang xanh và làm mới bộ nhớ đệm trang trạng thái.
 
 ---
@@ -72,6 +72,8 @@ Tự động phát hiện và quản lý vòng đời các sự cố gián đo�
 | GET | `/api/incidents` | Member | Lấy danh sách các sự cố của người dùng hiện tại |
 | GET | `/api/incidents/:id` | Member | Xem chi tiết một sự cố kèm báo cáo phân tích |
 | GET | `/api/monitors/:monitorId/incidents` | Member | Lấy lịch sử sự cố của một mục tiêu cụ thể |
+| PATCH | `/api/incidents/:id/resolve` | Member | Đóng sự cố thủ công và xóa khóa cache trên RAM |
+| POST | `/api/incidents/:id/reanalyze` | Member | Kích hoạt phân tích lại AI post-mortem cho sự cố |
 
 **Request and Response Payloads:**
 
@@ -175,7 +177,7 @@ export interface IncidentResponse {
 - **AC2:** Báo cáo phân tích từ trí tuệ nhân tạo được sinh tự động và gắn kết vào bản ghi sự cố trong vòng 15 giây kể từ khi phát hiện lỗi.
 - **AC3:** Thư điện tử cảnh báo được gửi thành công đến địa chỉ của chủ sở hữu mục tiêu kèm theo nội dung phân tích sự cố.
 - **AC4:** Khi mục tiêu kiểm tra hoạt động bình thường trở lại, sự cố tự động cập nhật sang trạng thái `resolved` kèm mốc thời gian kết thúc.
-- **AC5:** Người dùng chỉ xem được các sự cố thuộc về mục tiêu của mình, cố tình truy cập sự cố của người khác nhận mã HTTP 403.
+- **AC5:** Người dùng chỉ xem được các sự cố thuộc về mục tiêu của mình, cố tình truy cập sự cố của người khác nhận mã HTTP 404 Not Found (chống rò rỉ ID theo chuẩn bảo mật OWASP anti-enumeration).
 
 ---
 
@@ -189,5 +191,5 @@ export interface IncidentResponse {
 | LLM API gặp sự cố timeout | LLM không phản hồi sau 15s | Sự cố vẫn được tạo, `aiPostMortem` để trống, email gửi kèm lỗi thô |
 | Phục hồi sự cố thành công | Target chuyển từ Down sang Up | Cập nhật `status: 'resolved'`, ghi nhận `resolvedAt` |
 | Xem chi tiết sự cố của chính mình | Yêu cầu xem incident hợp lệ | HTTP 200 + đầy đủ thông tin sự cố và phân tích |
-| Xem sự cố của người dùng khác | Yêu cầu xem incident của user khác | HTTP 403 Forbidden |
+| Xem sự cố của người dùng khác | Yêu cầu xem incident của user khác | HTTP 404 Not Found |
 
