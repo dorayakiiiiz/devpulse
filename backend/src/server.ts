@@ -2,6 +2,8 @@ import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { connectDatabase, disconnectDatabase } from './config/db.js';
 import { pingEngine } from './services/pingEngine.js';
+import { realtimeService } from './services/realtimeService.js';
+import './services/incidentService.js';
 
 // Bootstrap backend server and handle lifecycle
 async function bootstrap(): Promise<void> {
@@ -19,6 +21,13 @@ async function bootstrap(): Promise<void> {
   // Handle graceful shutdown on termination signals
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`[Server] Received ${signal}. Starting graceful shutdown...`);
+
+    // Terminate persistent SSE client connections
+    try {
+      realtimeService.stop();
+    } catch (error) {
+      console.error('[Server] Error while stopping realtime service:', error);
+    }
 
     // Stop accepting new pings and flush all remaining buffered metrics before closing DB
     try {

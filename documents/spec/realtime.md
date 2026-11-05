@@ -3,7 +3,7 @@
 - Module: Realtime
 - Người phụ trách: Fullstack Developer
 - Ngày soạn: 2026-10-29
-- Trạng thái: Draft
+- Trạng thái: Implemented
 
 ---
 
@@ -17,7 +17,7 @@ Cung cấp kênh truyền phát dữ liệu một chiều từ máy chủ đến
 
 **Trong scope:**
 - Khởi tạo và duy trì kết nối truyền phát Server-Sent Events qua điểm kết nối `GET /api/sse/monitors`.
-- Xác thực quyền truy cập của người dùng qua JWT lưu trong Cookie trước khi chấp nhận kết nối.
+- Xác thực quyền truy cập của người dùng qua Access Token (truyền qua query param `?token=` cho EventSource hoặc Bearer header) trước khi chấp nhận kết nối.
 - Quản lý danh sách các kết nối đang hoạt động trong bộ nhớ RAM, phân nhóm theo `userId`.
 - Tiếp nhận sự kiện nội bộ từ mô-đun Ping Engine và mô-đun Incidents.
 - Lọc và truyền phát số liệu kiểm tra mới nhất đến đúng các kết nối thuộc quyền sở hữu của người dùng.
@@ -44,8 +44,8 @@ Cung cấp kênh truyền phát dữ liệu một chiều từ máy chủ đến
 ## 4. Core Business Flows
 
 ### 4.1. SSE Connection Establishment Flow
-1. Trình duyệt khởi tạo đối tượng EventSource kết nối đến đường dẫn `/api/sse/monitors`.
-2. Middleware kiểm tra tính hợp lệ của JWT trong Cookie. Nếu không hợp lệ hoặc thiếu cookie, trả về HTTP 401.
+1. Trình duyệt khởi tạo đối tượng EventSource kết nối đến đường dẫn `/api/sse/monitors?token=<accessToken>` (hoặc gửi header `Authorization: Bearer <accessToken>`).
+2. Middleware kiểm tra tính hợp lệ của Access Token. Nếu không hợp lệ hoặc thiếu token, trả về HTTP 401.
 3. Máy chủ thiết lập các tiêu đề phản hồi:
    - `Content-Type: text/event-stream`
    - `Cache-Control: no-cache`
@@ -121,7 +121,7 @@ export interface SseIncidentAlertEvent {
 | Code | Khi nào trả về |
 | :--- | :--- |
 | 200 | Thiết lập kết nối luồng một chiều thành công và duy trì mở liên tục |
-| 401 | Thiếu phiên đăng nhập hoặc JWT Cookie không hợp lệ |
+| 401 | Thiếu phiên đăng nhập hoặc Access Token không hợp lệ |
 
 ---
 
@@ -173,7 +173,7 @@ export interface SseIncidentAlertEvent {
 ## 10. Acceptance Criteria
 
 - **AC1:** Khi người dùng đã đăng nhập gọi `GET /api/sse/monitors`, máy chủ giữ kết nối mở với mã HTTP 200 và tiêu đề `text/event-stream`.
-- **AC2:** Khi gọi endpoint mà không có Cookie xác thực hợp lệ, máy chủ từ chối kết nối ngay lập tức với mã HTTP 401.
+- **AC2:** Khi gọi endpoint mà không có token xác thực hợp lệ, máy chủ từ chối kết nối ngay lập tức với mã HTTP 401.
 - **AC3:** Khi một mục tiêu hoàn thành lượt kiểm tra, dữ liệu được truyền phát tới đúng các cửa sổ trình duyệt của người dùng sở hữu mục tiêu đó trong vòng dưới 100 mili giây.
 - **AC4:** Khi đóng thẻ trình duyệt, máy chủ phát hiện sự kiện đóng kết nối và giải phóng đối tượng phản hồi khỏi bộ nhớ RAM.
 - **AC5:** Tín hiệu giữ kết nối được truyền đi đều đặn mỗi 30 giây để duy trì đường truyền không bị ngắt.
@@ -184,8 +184,8 @@ export interface SseIncidentAlertEvent {
 
 | Scenario | Input | Expected Output |
 | :--- | :--- | :--- |
-| Kết nối SSE thành công | Request có Cookie xác thực hợp lệ | HTTP 200 + headers text/event-stream + kết nối duy trì mở |
-| Kết nối thiếu xác thực | Request không chứa Cookie | HTTP 401 Unauthorized |
+| Kết nối SSE thành công | Request có Access Token hợp lệ | HTTP 200 + headers text/event-stream + kết nối duy trì mở |
+| Kết nối thiếu xác thực | Request không chứa token xác thực | HTTP 401 Unauthorized |
 | Truyền phát kết quả kiểm tra | Bắn sự kiện nội bộ PING_COMPLETED cho user A | Client của user A nhận event MONITOR_PING đúng định dạng |
 | Cách ly dữ liệu người dùng | Bắn sự kiện PING_COMPLETED cho user A | Client của user B không nhận được sự kiện đó |
 | Gửi tín hiệu giữ kết nối | Duy trì kết nối không có dữ liệu mới trong 30s | Nhận dòng chú thích heartbeat định kỳ |

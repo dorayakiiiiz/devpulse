@@ -10,9 +10,9 @@ interface JwtPayloadDecoded {
   role: UserRole;
 }
 
-// Middleware verifying access token from Authorization header
+// Middleware verifying access token from Authorization header or query parameter
 export function authenticate(req: Request, _res: Response, next: NextFunction): void {
-  const token = extractBearerToken(req.headers.authorization);
+  const token = extractToken(req);
 
   if (!token) {
     next(new AppError('Authentication token required', 401));
@@ -31,10 +31,13 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
   }
 }
 
-// Extract bearer token from Authorization header if present
-function extractBearerToken(authHeader?: string): string | undefined {
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return authHeader.substring(7);
+// Extract token from Authorization header or query parameter (for SSE EventSource)
+function extractToken(req: Request): string | undefined {
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    return req.headers.authorization.substring(7);
+  }
+  if (typeof req.query.token === 'string' && req.query.token.length > 0) {
+    return req.query.token;
   }
   return undefined;
 }
