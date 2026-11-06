@@ -7,9 +7,11 @@ import { memoryCache } from '../utils/cache.js';
 import { AppError } from '../utils/appError.js';
 import { IUser } from '../models/userModel.js';
 import { AuthUserDto } from './authService.js';
+import { statusPageService } from './statusPageService.js';
 
 export interface UpdateProfileDto {
-  name: string;
+  name?: string;
+  slug?: string;
 }
 
 export interface ChangePasswordDto {
@@ -29,9 +31,33 @@ export class UserService {
     return this.mapToDto(user);
   }
 
-  // Update user display name
+  // Update user display name and/or public status slug with uniqueness check
   async updateProfile(userId: string, data: UpdateProfileDto): Promise<AuthUserDto> {
-    const updatedUser = await userRepository.updateName(userId, data.name.trim());
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      throw new AppError('User account not found', 404);
+    }
+
+    const updateData: { name?: string; slug?: string } = {};
+
+    if (data.name !== undefined) {
+      updateData.name = data.name.trim();
+    }
+
+    if (data.slug !== undefined) {
+      const normalizedSlug = data.slug.trim().toLowerCase();
+      if (normalizedSlug !== user.slug) {
+        const existingSlugUser = await userRepository.findBySlug(normalizedSlug);
+        if (existingSlugUser && existingSlugUser._id.toString() !== userId) {
+          throw new AppError('Status page slug is already in use by another account', 409);
+        }
+        updateData.slug = normalizedSlug;
+        // Invalidate previous slug cache
+        statusPageService.clearCache(user.slug);
+      }
+    }
+
+    const updatedUser = await userRepository.updateProfileData(userId, updateData);
     if (!updatedUser) {
       throw new AppError('User account not found', 404);
     }
@@ -91,6 +117,7 @@ export class UserService {
       id: user._id.toString(),
       name: user.name,
       email: user.email,
+      slug: user.slug,
       role: user.role,
       isVerified: user.isVerified,
       createdAt: user.createdAt.toISOString(),

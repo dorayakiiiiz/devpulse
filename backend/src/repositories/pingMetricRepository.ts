@@ -51,6 +51,39 @@ export class PingMetricRepository extends BaseRepository<IPingMetric> {
     const result = await this.model.deleteMany({ monitorId: { $in: monitorIds } }).exec();
     return result.deletedCount || 0;
   }
+
+  // Calculate 24-hour uptime percentage across multiple monitors using an aggregation pipeline
+  async calculateUptime24h(monitorIds: Types.ObjectId[]): Promise<Map<string, number>> {
+    const uptimeMap = new Map<string, number>();
+    if (monitorIds.length === 0) {
+      return uptimeMap;
+    }
+
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const stats = await this.model.aggregate<{ _id: Types.ObjectId; total: number; up: number }>([
+      {
+        $match: {
+          monitorId: { $in: monitorIds },
+          timestamp: { $gte: twentyFourHoursAgo },
+        },
+      },
+      {
+        $group: {
+          _id: '$monitorId',
+          total: { $sum: 1 },
+          up: { $sum: { $cond: ['$isUp', 1, 0] } },
+        },
+      },
+    ]);
+
+    for (const stat of stats) {
+      const percentage = stat.total > 0 ? Math.round((stat.up / stat.total) * 10000) / 100 : 100;
+      uptimeMap.set(stat._id.toString(), percentage);
+    }
+
+    return uptimeMap;
+  }
 }
 
 export const pingMetricRepository = new PingMetricRepository();

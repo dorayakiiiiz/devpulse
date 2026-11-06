@@ -13,6 +13,11 @@ export class MonitorRepository extends BaseRepository<IMonitor> {
     return this.model.find({ userId: new Types.ObjectId(userId) }).sort({ createdAt: -1 }).exec();
   }
 
+  // Find active monitors belonging to a user for public status display
+  async findActiveByUser(userId: string): Promise<IMonitor[]> {
+    return this.model.find({ userId: new Types.ObjectId(userId), isActive: true }).sort({ createdAt: 1 }).exec();
+  }
+
   // Find a monitor scoped strictly to its primary key and owning user ID
   async findByIdAndUser(id: string, userId: string): Promise<IMonitor | null> {
     return this.model.findOne({ _id: new Types.ObjectId(id), userId: new Types.ObjectId(userId) }).exec();

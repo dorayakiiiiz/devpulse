@@ -7,6 +7,7 @@ import { memoryCache } from '../utils/cache.js';
 import { env } from '../config/env.js';
 import { AppError } from '../utils/appError.js';
 import { IUser } from '../models/userModel.js';
+import { generateSlug } from '../utils/slug.js';
 
 export interface RegisterDto {
   name: string;
@@ -28,6 +29,7 @@ export interface AuthUserDto {
   id: string;
   name: string;
   email: string;
+  slug: string;
   role: 'member' | 'admin';
   isVerified: boolean;
   createdAt: string;
@@ -75,6 +77,7 @@ export class AuthService {
       await userRepository.create({
         name: data.name.trim(),
         email: normalizedEmail,
+        slug: generateSlug(data.name),
         passwordHash,
         role: 'member',
         isVerified: false,
@@ -335,6 +338,7 @@ export class AuthService {
       id: user._id.toString(),
       name: user.name,
       email: user.email,
+      slug: user.slug,
       role: user.role,
       isVerified: user.isVerified,
       createdAt: user.createdAt.toISOString(),

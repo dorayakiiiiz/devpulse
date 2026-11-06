@@ -6,6 +6,7 @@ export interface IUser extends Document {
   _id: Types.ObjectId;
   name: string;
   email: string;
+  slug: string;
   passwordHash: string;
   role: UserRole;
   isVerified: boolean;
@@ -29,6 +30,14 @@ const userSchema = new Schema<IUser>(
       unique: true,
       trim: true,
       lowercase: true,
+      index: true,
+    },
+    slug: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
       index: true,
     },
     passwordHash: {

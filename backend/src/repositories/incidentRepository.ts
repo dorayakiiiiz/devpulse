@@ -92,6 +92,25 @@ export class IncidentRepository extends BaseRepository<IIncident> {
       .exec();
   }
 
+  // Find recent incidents for public status page across active monitors within past 7 days
+  async findRecentForStatusPage(monitorIds: Types.ObjectId[], limit = 5): Promise<IIncident[]> {
+    if (monitorIds.length === 0) {
+      return [];
+    }
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    return this.model
+      .find({
+        monitorId: { $in: monitorIds },
+        createdAt: { $gte: sevenDaysAgo },
+      })
+      .populate('monitorId', 'name url')
+      .sort({ startedAt: -1 })
+      .limit(limit)
+      .exec();
+  }
+
   // Delete all incidents associated with a target monitor
   async deleteByMonitor(monitorId: string): Promise<number> {
     const result = await this.model.deleteMany({ monitorId: new Types.ObjectId(monitorId) }).exec();

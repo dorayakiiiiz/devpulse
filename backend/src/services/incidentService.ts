@@ -4,6 +4,7 @@ import { monitorRepository } from '../repositories/monitorRepository.js';
 import { userRepository } from '../repositories/userRepository.js';
 import { aiService } from './aiService.js';
 import { emailService } from './emailService.js';
+import { statusPageService } from './statusPageService.js';
 import { eventBus, PingCompletedEvent } from '../utils/eventBus.js';
 import { memoryCache } from '../utils/cache.js';
 import { IIncident, IncidentStatus } from '../models/incidentModel.js';
@@ -115,6 +116,9 @@ export class IncidentService {
       errorMessage: payload.error,
     });
 
+    // Invalidate public status page cache immediately upon outage detection
+    void statusPageService.invalidateCacheForUser(payload.userId);
+
     // Push task into AI background queue for automated diagnosis and email alert
     aiService.queueIncidentAnalysis({
       incidentId: incident._id.toString(),
@@ -157,6 +161,9 @@ export class IncidentService {
       startedAt: resolvedIncident.startedAt.toISOString(),
       resolvedAt: payload.timestamp,
     });
+
+    // Invalidate public status page cache upon target recovery
+    void statusPageService.invalidateCacheForUser(payload.userId);
 
     const monitor = await monitorRepository.findById(payload.monitorId);
     const user = await userRepository.findById(payload.userId);
@@ -230,6 +237,9 @@ export class IncidentService {
       startedAt: incident.startedAt.toISOString(),
       resolvedAt: resolvedDate.toISOString(),
     });
+
+    // Invalidate public status page cache upon manual incident resolution
+    void statusPageService.invalidateCacheForUser(userId);
 
     return this.mapToDto(updated);
   }
