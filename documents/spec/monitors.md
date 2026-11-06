@@ -85,6 +85,7 @@ Cung cấp khả năng quản lý cấu hình các mục tiêu giám sát cho ng
 | GET | `/api/monitors` | Member | Lấy danh sách mục tiêu của user hiện tại |
 | POST | `/api/monitors` | Member | Tạo mục tiêu giám sát mới |
 | GET | `/api/monitors/:id` | Member | Lấy thông tin chi tiết một mục tiêu |
+| GET | `/api/monitors/:id/metrics` | Member | Lấy lịch sử độ trễ / ping metrics của mục tiêu (hỗ trợ query `?limit=50&range=1h\|24h\|7d`) |
 | PUT | `/api/monitors/:id` | Member | Cập nhật cấu hình một mục tiêu |
 | PATCH | `/api/monitors/:id/toggle` | Member | Tạm dừng (Pause) hoặc kích hoạt lại (Resume) monitor |
 | POST | `/api/monitors/:id/ping` | Member | Kích hoạt kiểm tra tức thì một mục tiêu |
@@ -144,6 +145,17 @@ export interface InstantPingResponse {
   isUp: boolean;
   checkedAt: string;
   error?: string;
+}
+
+// GET /api/monitors/:id/metrics - Response Item
+export interface MonitorMetricItem {
+  id: string;
+  monitorId: string;
+  timestamp: string;
+  statusCode: number;
+  latency: number;
+  isUp: boolean;
+  error: string | null;
 }
 ```
 
@@ -221,6 +233,7 @@ export interface InstantPingResponse {
 - **AC4:** Khi chuyển trạng thái `isActive` từ bật sang tắt, trường `isActive` cập nhật thành false và hệ thống trả về HTTP 200.
 - **AC5:** Xóa mục tiêu thành công loại bỏ hoàn toàn bản ghi khỏi database và trả về HTTP 200.
 - **AC6:** Người dùng có thể kích hoạt kiểm tra tức thì mục tiêu của mình qua endpoint ping và nhận về kết quả đo lường mới nhất; các yêu cầu gửi lại trong vòng 15 giây bị từ chối với mã HTTP 429.
+- **AC7:** Người dùng có thể tra cứu lịch sử độ trễ và các lần ping gần nhất của mục tiêu thuộc quyền sở hữu qua endpoint `/api/monitors/:id/metrics` kèm bộ lọc thời gian (`1h`, `24h`, `7d`) và giới hạn số lượng (`limit`), trả về HTTP 200 và danh sách metric theo thứ tự mới nhất trước.
 
 ---
 
@@ -237,6 +250,8 @@ export interface InstantPingResponse {
 | Kích hoạt kiểm tra tức thì | POST `/api/monitors/:id/ping` của chính mình | HTTP 200 + kết quả đo lường latency mới nhất |
 | Kích hoạt kiểm tra trong cooldown | Gọi ping liên tiếp 2 lần trong 5s | HTTP 429 Too Many Requests |
 | Kích hoạt kiểm tra monitor người khác | POST `/api/monitors/:id/ping` của user B | HTTP 404 Not Found |
+| Lấy lịch sử metrics monitor của mình | GET `/api/monitors/:id/metrics?range=24h&limit=50` | HTTP 200 + danh sách ping metrics gần nhất |
+| Lấy metrics monitor người khác | GET `/api/monitors/:id/metrics` của user B | HTTP 404 Not Found |
 | Xóa monitor thành công | DELETE monitor ID hợp lệ | HTTP 200 + bản ghi bị xóa khỏi database |
 | Xóa monitor không tồn tại | DELETE ID ngẫu nhiên không có trong DB | HTTP 404 Not Found |
 

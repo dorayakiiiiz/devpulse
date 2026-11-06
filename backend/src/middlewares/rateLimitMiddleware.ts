@@ -29,7 +29,7 @@ export const instantPingLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || req.ip || 'anonymous',
+  keyGenerator: (req) => req.user!.id,
   handler: (_req, _res, next) => {
     next(new AppError('Instant ping limit exceeded. Maximum 5 requests per minute allowed.', 429));
   },

@@ -58,6 +58,16 @@ export interface InstantPingResponseDto {
   error?: string;
 }
 
+export interface MonitorMetricDto {
+  id: string;
+  monitorId: string;
+  timestamp: string;
+  statusCode: number;
+  latency: number;
+  isUp: boolean;
+  error: string | null;
+}
+
 // Service encapsulating monitor lifecycle management and network inspection routines
 export class MonitorService {
   // Create a new monitor with initial SSL inspection for HTTPS targets
@@ -191,6 +201,40 @@ export class MonitorService {
       checkedAt: result.checkedAt.toISOString(),
       ...(result.error ? { error: result.error } : {}),
     };
+  }
+
+  // Retrieve recent ping metrics for a specific monitor scoped to the authenticated user
+  async getMonitorMetrics(
+    userId: string,
+    monitorId: string,
+    options: { limit?: number; range?: '1h' | '24h' | '7d' }
+  ): Promise<MonitorMetricDto[]> {
+    const monitor = await monitorRepository.findByIdAndUser(monitorId, userId);
+    if (!monitor) {
+      throw new AppError('Monitor not found', 404);
+    }
+
+    let since: Date | undefined;
+    if (options.range === '1h') {
+      since = new Date(Date.now() - 60 * 60 * 1000);
+    } else if (options.range === '24h') {
+      since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    } else if (options.range === '7d') {
+      since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    }
+
+    const limit = Math.min(Math.max(options.limit ?? 50, 1), 100);
+    const metrics = await pingMetricRepository.findRecentByMonitor(monitorId, limit, since);
+
+    return metrics.map((metric) => ({
+      id: metric._id.toString(),
+      monitorId: metric.monitorId.toString(),
+      timestamp: metric.timestamp.toISOString(),
+      statusCode: metric.statusCode,
+      latency: metric.latency,
+      isUp: metric.isUp,
+      error: metric.error ?? null,
+    }));
   }
 
   // Transform internal Mongoose monitor document to client-safe response DTO

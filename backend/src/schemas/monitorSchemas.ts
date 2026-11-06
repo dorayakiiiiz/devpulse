@@ -53,3 +53,17 @@ export const monitorIdParamSchema = z.object({
   }),
 });
 
+// Validation schema for querying monitor metrics
+export const queryMonitorMetricsSchema = z.object({
+  params: z.object({
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid monitor ID format'),
+  }),
+  query: z.object({
+    range: z.enum(['1h', '24h', '7d']).optional(),
+    limit: z
+      .string()
+      .optional()
+      .transform((val) => (val ? parseInt(val, 10) : 50)),
+  }),
+});
+

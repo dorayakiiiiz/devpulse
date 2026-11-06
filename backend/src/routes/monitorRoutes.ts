@@ -5,11 +5,13 @@ import {
   createMonitorSchema,
   updateMonitorSchema,
   monitorIdParamSchema,
+  queryMonitorMetricsSchema,
 } from '../schemas/monitorSchemas.js';
 import {
   listMonitors,
   createMonitor,
   getMonitor,
+  getMonitorMetrics,
   updateMonitor,
   toggleMonitor,
   triggerInstantPing,
@@ -25,6 +27,7 @@ router.post('/', validateRequest(createMonitorSchema), createMonitor);
 
 // Specific monitor operations scoped by ID
 router.get('/:id', validateRequest(monitorIdParamSchema), getMonitor);
+router.get('/:id/metrics', validateRequest(queryMonitorMetricsSchema), getMonitorMetrics);
 router.get('/:id/incidents', validateRequest(monitorIdParamSchema), getMonitorIncidents);
 router.put('/:id', validateRequest(updateMonitorSchema), updateMonitor);
 router.patch('/:id/toggle', validateRequest(monitorIdParamSchema), toggleMonitor);

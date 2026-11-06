@@ -32,6 +32,17 @@ export async function getMonitor(req: Request, res: Response, next: NextFunction
   }
 }
 
+// Retrieve historical ping metrics for a specific monitor
+export async function getMonitorMetrics(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { limit, range } = req.query as { limit?: number; range?: '1h' | '24h' | '7d' };
+    const metrics = await monitorService.getMonitorMetrics(req.user!.id, req.params.id, { limit, range });
+    sendSuccess(res, metrics);
+  } catch (error) {
+    next(error);
+  }
+}
+
 // Update monitor configuration
 export async function updateMonitor(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {

@@ -30,10 +30,15 @@ export class PingMetricRepository extends BaseRepository<IPingMetric> {
     return result.insertedCount || 0;
   }
 
-  // Retrieve the latest ping metrics for a specific monitor
-  async findRecentByMonitor(monitorId: string, limit = 50): Promise<IPingMetric[]> {
+  // Retrieve the latest ping metrics for a specific monitor with optional time filter
+  async findRecentByMonitor(monitorId: string, limit = 50, since?: Date): Promise<IPingMetric[]> {
+    const query: Record<string, unknown> = { monitorId: new Types.ObjectId(monitorId) };
+    if (since) {
+      query.timestamp = { $gte: since };
+    }
+
     return this.model
-      .find({ monitorId: new Types.ObjectId(monitorId) })
+      .find(query)
       .sort({ timestamp: -1 })
       .limit(limit)
       .exec();
