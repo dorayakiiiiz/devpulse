@@ -1,330 +1,405 @@
-<!-- AGENT_DIRECTIVE: READ_ALLOWED -->
-# DevPulse Master System Architecture & End-to-End Execution Flow
+# DevPulse End-to-End System Architecture & Execution Flow Blueprint
 
-Tài liệu thiết kế kỹ thuật kiến trúc tổng thể toàn diện của nền tảng **DevPulse**, mô tả cấu trúc vận hành từ đầu đến cuối (End-to-End) bao quát toàn bộ các tầng: Giao diện người dùng (Frontend SPA), Cổng Reverse Proxy (Nginx), Dịch vụ máy chủ (Backend REST API & SSE), Động cơ lập lịch ngầm (Ping Engine Daemon), Hệ thống truyền tin hướng sự kiện nội bộ (EventBus), Máy trạng thái sự cố (Incident State Machine), Hàng đợi xử lý AI & Email (Task Queues), Cơ chế bộ nhớ đệm đa tầng (Multi-tier Caching) và Cơ sở dữ liệu chuỗi thời gian (MongoDB Time-Series).
+Tài liệu thiết kế kiến trúc kỹ thuật toàn diện của hệ thống **DevPulse**, mô tả từ mức vĩ mô hạ tầng đến chi tiết luồng thực thi mã nguồn và các mắt xích chuyển tiếp dữ liệu (Execution Bridges) giữa toàn bộ các phân hệ: Frontend SPA, Nginx Gateway, Layered Clean Architecture Backend, MongoDB Time-Series Database, In-Memory Caching, Ping Engine Daemon, Realtime SSE Streaming, Pluggable AI Diagnostic Queue và Incident Management Hub.
 
 ---
 
-## 1. High-Level Master Topology (End-to-End System Diagram)
+## 1. High-Level Macro Topology
 
-Sơ đồ kiến trúc tổng thể dưới đây biểu diễn toàn bộ vòng đời tương tác giữa người dùng, client, các daemon chạy ngầm và hạ tầng lưu trữ.
+Kiến trúc DevPulse được thiết kế tối ưu hóa đặc biệt cho môi trường máy chủ biên giới hạn tài nguyên (**VPS Linux 1GB RAM / 1 vCPU**), triệt tiêu hoàn toàn sự phụ thuộc vào các dịch vụ nặng nề (như Redis độc lập hay RabbitMQ) mà vẫn đảm bảo hiệu năng xử lý cao, không nghẽn Event Loop và đáp ứng thời gian thực.
+
+```mermaid
+flowchart TB
+    subgraph ClientZone ["1. Client & Presentation Layer"]
+        UserBrowser["User Browser (Authenticated)<br>React 18 SPA + Vite + Tailwind<br>• Axios Client (Bearer Token)<br>• Native EventSource (/api/sse/monitors)"]
+        PublicVisitor["Public Visitor (Anonymous)<br>Status Page Viewer<br>• GET /api/status/:slug"]
+    end
+
+    subgraph EdgeGateway ["2. Edge & Reverse Proxy Layer (Nginx)"]
+        Nginx["Nginx Reverse Proxy (Port 80/443 SSL)<br>• SSL Termination (Let's Encrypt)<br>• HTTP Reverse Proxy Pass<br>• proxy_buffering off & X-Accel-Buffering: no<br>• proxy_read_timeout 24h (SSE Persistent)"]
+    end
+
+    subgraph BackendApp ["3. Node.js Layered Clean Architecture (Port 5000)"]
+        subgraph PipelineLayer ["A. Express Pipeline & Security Guards"]
+            CORS["CORS (Credentials: true)"]
+            CookiePars["Cookie Parser (HttpOnly refreshToken)"]
+            RateLimiters["Rate Limiting (IP & OTP Cooldown)"]
+            AuthGuard["authMiddleware (Header or ?token=)"]
+            ZodValid["validateRequest (Zod Schemas)"]
+        end
+
+        subgraph CoreControllers ["B. Thin Controllers Layer"]
+            AuthController["authController"]
+            MonitorController["monitorController"]
+            IncidentController["incidentController"]
+            StatusController["statusPageController"]
+            SSEController["sseController"]
+            AdminController["adminController"]
+        end
+
+        subgraph BusinessServices ["C. Domain Application Services"]
+            AuthSvc["authService"]
+            UserSvc["userService"]
+            MonitorSvc["monitorService"]
+            IncidentSvc["incidentService"]
+            StatusSvc["statusPageService"]
+            RealtimeSvc["realtimeService"]
+            AISvc["aiService"]
+            EmailSvc["emailService"]
+        end
+
+        subgraph InternalMessaging ["D. Event Bus & In-Memory Queues"]
+            EventBus["eventBus.ts (AppEventBus / EventEmitter)"]
+            AIQueue["aiService.queue (async.queue, conc=2)"]
+            EmailQueue["emailService.queue (async.queue, conc=2)"]
+        end
+
+        subgraph BackgroundDaemons ["E. Ping Engine & In-Memory Buffers"]
+            PingDaemon["pingEngine.ts (node-cron Schedulers)"]
+            WorkerPool["p-limit Pool (Max 5 concurrent)"]
+            PacingCtrl["Pacing Delay (100ms)"]
+            Prober["pingExecutor.ts (Native fetch + Abort)"]
+            RAMBuffer["metricBuffer.ts (RAM Batching Buffer)"]
+            RAMCache["memoryCache.ts (node-cache + Stampede Lock)"]
+        end
+
+        subgraph DataRepositories ["F. Data Access Layer (Repositories)"]
+            UserRepo["userRepository"]
+            MonitorRepo["monitorRepository"]
+            IncidentRepo["incidentRepository"]
+            MetricRepo["pingMetricRepository"]
+            OtpRepo["otpRepository"]
+        end
+    end
+
+    subgraph DataStorage ["4. Persistence Layer (MongoDB 7.0 Container)"]
+        DB_Users[("Collection: users<br>• email unique index<br>• slug unique index")]
+        DB_Monitors[("Collection: monitors<br>• userId index<br>• isActive + interval index")]
+        DB_Metrics[("Time-Series: ping_metrics<br>• timeField: timestamp<br>• metaField: monitorId<br>• TTL: 7 days")]
+        DB_Incidents[("Collection: incidents<br>• userId + createdAt index<br>• monitorId + startedAt index")]
+        DB_Otp[("Collection: otp_codes<br>• TTL: 5 minutes")]
+    end
+
+    subgraph ExternalThirdParty ["5. External Ecosystem & Targets"]
+        Targets["Target Web Endpoints & APIs<br>(HTTP / HTTPS Health Checks)"]
+        GroqLLM["Groq Cloud API<br>(LLaMA 3.3 70B JSON Mode)"]
+        GeminiLLM["Google Gemini API<br>(Gemini 1.5 Flash JSON)"]
+        SMTPServer["SMTP Mail Server<br>(Nodemailer Alert Delivery)"]
+    end
+
+    %% Network flows
+    UserBrowser -->|HTTPS REST & SSE| Nginx
+    PublicVisitor -->|HTTPS Public Status| Nginx
+    Nginx -->|Reverse Proxy| PipelineLayer
+
+    PipelineLayer --> CoreControllers
+    CoreControllers --> BusinessServices
+    BusinessServices --> DataRepositories
+    DataRepositories --> DataStorage
+
+    %% Internal messaging & daemon links
+    PingDaemon --> WorkerPool --> PacingCtrl --> Prober
+    Prober -->|Probe HTTP/S| Targets
+    Prober -->|Record Result| RAMBuffer
+    Prober -->|Emit Ping Event| EventBus
+    RAMBuffer -->|Bulk Insert / Update| DataRepositories
+
+    EventBus -->|onPingCompleted| RealtimeSvc
+    EventBus -->|onPingCompleted| IncidentSvc
+    IncidentSvc -->|State Check| RAMCache
+    IncidentSvc -->|Outage Detected| EventBus
+    IncidentSvc -->|Queue Analysis| AIQueue
+    
+    AIQueue --> AISvc
+    AISvc -->|JSON Mode Prompt| GroqLLM
+    AISvc -->|JSON Mode Prompt| GeminiLLM
+    AISvc -->|Save Report & Emit Event| EventBus
+    AISvc -->|Trigger Email| EmailQueue
+    EmailQueue --> EmailSvc -->|Send Mail| SMTPServer
+
+    EventBus -->|onIncidentAlert| RealtimeSvc
+    RealtimeSvc -->|SSE Stream Push| Nginx
+    StatusSvc -->|Read-through Stampede Cache| RAMCache
+```
+
+---
+
+## 2. Dual-Engine Event-Driven Loop
+
+Sơ đồ chi tiết hóa vòng đời khép kín từ thời điểm Cron Scheduler kích hoạt tiến trình ping, đi qua cơ chế phân phối tải, kiểm tra kết quả, rẽ nhánh xử lý dữ liệu số đo (Metrics) và trạng thái sự cố (Incident State Machine), đến khi đẩy cập nhật thời gian thực xuống giao diện người dùng.
 
 ```mermaid
 flowchart TD
-    %% CLIENT LAYER
-    subgraph ClientLayer ["1. Client Layer (Presentation & Real-Time Sync)"]
-        BrowserUser["User / Admin Browser<br>(React 18 + Vite SPA)"]
-        GuestUser["Anonymous Visitor<br>(Public Status Page)"]
+    subgraph SchedStep ["Giai đoạn 1: Lập lịch & Điều tiết Tải (Ping Engine)"]
+        CronTick["node-cron Scheduler<br>(Tick mỗi 30s / 60s / 300s)"] --> ActiveGuard{"activeRuns Lock?<br>(Chống chồng lấn chu kỳ)"}
+        ActiveGuard -- "Đang bận" --> SkipCycle["Skip chu kỳ hiện tại"]
+        ActiveGuard -- "Sẵn sàng" --> QueryMonitors["monitorRepository.findActiveByInterval(interval)"]
+        QueryMonitors --> ConcurrencyLimit["p-limit Pool (Giới hạn tối đa 5 tác vụ)"]
+        ConcurrencyLimit --> PacingStep["Pacing Delay: 100ms giữa các worker<br>(Chống spike CPU & cạn kiệt socket)"]
     end
 
-    %% INGRESS LAYER
-    subgraph IngressLayer ["2. Ingress & Security Gateway"]
-        Nginx["Nginx Reverse Proxy<br>• Let's Encrypt SSL/TLS<br>• Gzip / Cache-Control Proxy<br>• X-Accel-Buffering: no (SSE)"]
+    subgraph ProbeStep ["Giai đoạn 2: Bắn Probe Mạng & Cơ chế Tự phục hồi"]
+        PacingStep --> NetProbe1["executeSingleProbe(monitor)<br>• Native fetch + AbortController (10s)<br>• Đo độ trễ network roundtrip"]
+        NetProbe1 -- "Status 2xx / 3xx" --> ProbePass["Kết quả: UP (isUp = true)"]
+        NetProbe1 -- "Status 4xx / 5xx / Timeout" --> RetestWait["Fast Retest: Chờ 2000ms<br>(Chống báo động giả - False Positive)"]
+        RetestWait --> NetProbe2["executeSingleProbe(monitor) (Lần 2)"]
+        NetProbe2 -- "Lần 2 thành công" --> ProbePass
+        NetProbe2 -- "Lần 2 vẫn thất bại" --> ProbeFail["Kết quả: DOWN (isUp = false)<br>Gom mã lỗi, body dump & headers"]
     end
 
-    BrowserUser -->|HTTPS REST / Cookies| Nginx
-    BrowserUser -->|SSE Connection ?token=| Nginx
-    GuestUser -->|HTTPS GET /status/:slug| Nginx
-
-    %% BACKEND LAYER
-    subgraph BackendApp ["3. Node.js Backend API Service (Express + TypeScript)"]
-        Router["Express App Router & Middlewares<br>• Rate Limiting (Multi-tier)<br>• Zod Request Validation<br>• JWT Auth & Role Guard"]
-        Nginx -->|Proxy Pass /api| Router
-
-        subgraph CoreAPIs ["REST API Controllers & Services"]
-            AuthController["Auth & User Module<br>(BCrypt, JWT Cookie, OTP TTL)"]
-            MonitorController["Monitor CRUD & Instant Ping<br>(IDOR Scoping, SSL Checker)"]
-            IncidentController["Incident Management<br>(Manual Resolve, Reanalyze)"]
-            StatusPageService["Status Page Service<br>(2-Tier Cache, Stampede Guard)"]
-        end
-
-        Router --> AuthController
-        Router --> MonitorController
-        Router --> IncidentController
-        Router --> StatusPageService
-
-        subgraph RealtimeModule ["Real-Time Streaming Hub (SSE)"]
-            SSEController["SSE Controller (/api/sse/monitors)"]
-            SSEPool["In-Memory Connection Pool<br>Map<userId, Set<Response>><br>• Heartbeat Keep-Alive (30s)<br>• Client disconnect auto-drain"]
-            SSEController --> SSEPool
-        end
-        Router --> SSEController
-
-        subgraph EventBusHub ["In-Process Event Hub"]
-            EventBus{"Internal EventBus<br>(Node.js EventEmitter)"}
-        end
-
-        subgraph DaemonScheduler ["Ping Engine Daemon (Background Worker)"]
-            Cron["node-cron Scheduler<br>(30s / 60s / 300s)"]
-            ActiveLock{"activeRuns Lock<br>(Chống chồng chéo)"]
-            PLimitPool["p-limit Pool (Max 5 Concurrency)<br>+ Pacing Delay (100ms)"]
-            PingExecutor["Ping Executor<br>• 10s AbortController Timeout<br>• Fast Retest (2s) chống False Alarm"]
-
-            Cron --> ActiveLock
-            ActiveLock -- "Idle" --> PLimitPool
-            PLimitPool --> PingExecutor
-        end
-
-        subgraph BatchBuffer ["High-Throughput Metric Ingestion"]
-            RAMBuffer["MetricBuffer (RAM)<br>capacity: 100 items / timer: 5s"]
-            AtomicDrain["Atomic Drain: buffer.splice(0)"]
-            RAMBuffer -->|Threshold reached| AtomicDrain
-        end
-
-        subgraph IncidentEngine ["Incident State Machine & Pluggable AI"]
-            IncidentMgr["IncidentService<br>• RAM Cache Key: ongoing_incident:id (TTL=0)<br>• 0-DB Query Outage Lookup"]
-            AIQueue["AI Task Queue<br>(async.queue, Concurrency = 2)"]
-            EmailQueue["Email Task Queue<br>(async.queue, Concurrency = 2)"]
-            
-            AIProvider{"Pluggable LLM Provider<br>(Groq LLaMA 3.3 / Gemini 1.5)"}
-            SMTPService["Nodemailer SMTP Mailer<br>(Exponential Backoff 3 retries)"]
-
-            AIQueue --> AIProvider
-            EmailQueue --> SMTPService
-        end
+    subgraph DispatchBranch ["Giai đoạn 3: Rẽ nhánh Xử lý Dữ liệu Song song"]
+        ProbePass --> RecordResult["recordPingResult(monitor, result)"]
+        ProbeFail --> RecordResult
+        RecordResult --> BranchA["Nhánh A: Gom Batch Số đo<br>(metricBuffer.push)"]
+        RecordResult --> BranchB["Nhánh B: Bắn sự kiện nội bộ<br>(eventBus.emitPingCompleted)"]
     end
 
-    %% DATA PERSISTENCE LAYER
-    subgraph DataLayer ["4. Persistence & In-Memory Storage"]
-        NodeCache["In-Memory RAM Cache (node-cache)<br>• Ongoing Incidents (TTL=0)<br>• Status Page Data (TTL=30s)<br>• Status Slug Pointers (TTL=24h)<br>• Ping Cooldowns (15s)"]
-        MongoDB[(MongoDB 7.0 Community Edition)]
+    subgraph IngestionBranch ["Giai đoạn 4A: Ghi dữ liệu Hàng loạt (Batch Ingestion)"]
+        BranchA --> BufferCheck{"Buffer >= 100 items<br>HOẶC Timer 5s tick?"}
+        BufferCheck -- "Chưa đủ điều kiện" --> WaitBuffer["Giữ trong RAM buffer"]
+        BufferCheck -- "Đủ điều kiện" --> FlushBuffer["metricBuffer.flush()<br>• buffer.splice(0) cô lập batch<br>• Aggregate latest state per monitor"]
+        FlushBuffer --> BulkMetrics["pingMetricRepository.bulkInsert(items)<br>• bulkWrite unordered vào ping_metrics"]
+        FlushBuffer --> BulkMonitors["monitorRepository.bulkUpdateStatus(map)<br>• bulkWrite unordered vào monitors"]
+    end
+
+    subgraph IncidentBranch ["Giai đoạn 4B: Máy trạng thái Sự cố (Incident State Machine)"]
+        BranchB --> EventHub{"eventBus Hub"}
+        EventHub -->|onPingCompleted| RealtimePing["realtimeService.broadcastMonitorPing()<br>Gửi event MONITOR_PING tới SSE client"]
+        EventHub -->|onPingCompleted| IncidentHandler["incidentService.handlePingCompleted()"]
+
+        IncidentHandler --> CheckIsUp{"payload.isUp?"}
         
-        subgraph MongoCollections ["Collections"]
-            ColUsers[("users<br>Unique: email, slug")]
-            ColMonitors[("monitors<br>Index: userId, interval")]
-            ColMetrics[("ping_metrics (Time-Series)<br>granularity: seconds, TTL: 7 days")]
-            ColIncidents[("incidents<br>Index: monitorId, userId, status")]
-            ColOTP[("otp_codes<br>TTL Index: 5 minutes")]
-        end
-        MongoDB --- MongoCollections
+        %% Nhánh xử lý Downtime
+        CheckIsUp -- "isUp == false" --> CheckOngoingCache{"memoryCache.get(<br>'ongoing_incident:id')"}
+        CheckOngoingCache -- "Đã có Ongoing ID" --> SkipIncident["O(1) Bỏ qua: Mục tiêu đang trong đợt downtime<br>(0 query DB, không tạo trùng ticket)"]
+        CheckOngoingCache -- "Chưa có" --> CreateIncident["Tạo mới Incident (status: 'ongoing')<br>Ghi ongoing_incident:id vào RAM (TTL=0)<br>Xóa cache status page của user"]
+        CreateIncident --> EmitPhase1["eventBus.emitIncidentAlert(<br>status: 'ongoing', aiPostMortem: undefined)"]
+        EmitPhase1 --> SSEPhase1["realtimeService: Bắn INCIDENT_ALERT<br>Frontend đổi badge ĐỎ, hiện AI Loading"]
+        CreateIncident --> PushAIQueue["aiService.queueIncidentAnalysis(task)"]
+
+        %% Nhánh xử lý Recovery
+        CheckIsUp -- "isUp == true" --> CheckRecoveryCache{"memoryCache.get(<br>'ongoing_incident:id')"}
+        CheckRecoveryCache -- "null" --> TargetNormal["O(1) Bỏ qua: Mục tiêu vẫn khỏe mạnh bình thường<br>(0 query DB)"]
+        CheckRecoveryCache -- "Có Ongoing ID" --> ResolveIncident["incidentRepository.resolveIncident(id, now)<br>• Đổi status -> 'resolved'<br>• Xóa key 'ongoing_incident:id' khỏi RAM"]
+        ResolveIncident --> EmitRecovery["eventBus.emitIncidentAlert(status: 'resolved')"]
+        EmitRecovery --> SSERecovery["realtimeService: Bắn INCIDENT_ALERT<br>Frontend đổi badge XANH (Resolved)"]
+        ResolveIncident --> EmailRecovery["emailService.sendIncidentResolvedEmail()<br>Đẩy vào email queue gửi thông báo phục hồi"]
     end
 
-    %% EXTERNAL TARGETS & SERVICES
-    subgraph ExternalEcosystem ["5. External Web & 3rd-Party APIs"]
-        MonitoredTargets["Monitored Targets<br>(Websites, Microservices, Public APIs)"]
-        LLMAPIs["External AI Endpoints<br>(Groq API / Google Gemini API)"]
-        UserMailbox["Customer Mailbox<br>(Downtime & Recovery Notifications)"]
+    subgraph AIWorkerBranch ["Giai đoạn 5: Hàng đợi AI Post-Mortem & Cảnh báo Email"]
+        PushAIQueue --> AIWorker["async.queue Worker (concurrency = 2)"]
+        AIWorker --> LLMProvider{"Cấu hình AI_PROVIDER"}
+        LLMProvider -- "groq" --> GroqExec["GroqProvider (LLaMA 3.3 70B)<br>temperature=0.2, format=json_object"]
+        LLMProvider -- "gemini" --> GeminiExec["GeminiProvider (Gemini 1.5 Flash)<br>responseMimeType=application/json"]
+        GroqExec --> SavePostMortem["incidentRepository.updateAiPostMortem(id, report)"]
+        GeminiExec --> SavePostMortem
+        SavePostMortem --> EmitPhase2["eventBus.emitIncidentAlert(<br>status: 'ongoing', aiPostMortem: report)"]
+        EmitPhase2 --> SSEPhase2["realtimeService: Bắn INCIDENT_ALERT<br>Frontend tắt Loading, hiển thị thẻ chẩn đoán AI"]
+        SavePostMortem --> EmailAlert["emailService.sendIncidentAlertEmail()<br>Gửi email cảnh báo kèm chi tiết root-cause"]
     end
-
-    %% INTER-COMPONENT CONNECTIONS
-    PingExecutor -->|HTTP/HTTPS Probes| MonitoredTargets
-    PingExecutor -->|Branch 1: Raw Metrics| RAMBuffer
-    PingExecutor -->|Branch 2: emitPingCompleted| EventBus
-
-    AtomicDrain -->|Unordered bulkWrite Insert| ColMetrics
-    AtomicDrain -->|Unordered bulkWrite Status Update| ColMonitors
-
-    EventBus -->|onPingCompleted: Broadcast Latency| SSEPool
-    EventBus -->|onPingCompleted: State Machine Check| IncidentMgr
-    IncidentMgr <-->|O(1) Cache Reads/Writes| NodeCache
-
-    IncidentMgr -->|Phase 1: Emit Outage Alert| EventBus
-    IncidentMgr -->|Push AI Diagnostic Task| AIQueue
-    AIProvider -->|Fetch Root-Cause JSON| LLMAPIs
-    AIProvider -->|Persist Post-Mortem| ColIncidents
-    AIProvider -->|Phase 2: Emit AI Diagnostic Alert| EventBus
-    AIProvider -->|Dispatch Outage Email| EmailQueue
-
-    IncidentMgr -->|Target Recovery: Emit Resolved Alert| EventBus
-    IncidentMgr -->|Dispatch Recovery Email| EmailQueue
-    SMTPService -->|Send Notification| UserMailbox
-
-    EventBus -->|onIncidentAlert: Stream UI Updates| SSEPool
-    SSEPool -->|SSE EventStream: MONITOR_PING & INCIDENT_ALERT| BrowserUser
-
-    StatusPageService <-->|Get or Set with Stampede Guard| NodeCache
-    StatusPageService -.->|Read Fallback on Cache Miss| ColMonitors
-    StatusPageService -.->|Read Fallback on Cache Miss| ColMetrics
-    StatusPageService -.->|Read Fallback on Cache Miss| ColIncidents
 ```
 
 ---
 
-## 2. Phân tích đối chiếu: Bản vẽ tay (Sketch) vs. Kiến trúc chuẩn thực tế
+## 3. Multi-Layer Memory Cache Architecture
 
-Bản vẽ phác thảo tay của bạn (`media_1793942870375_c276edab.jpg`) đã nắm bắt chính xác **xương sống hướng sự kiện (Event-Driven Backbone)** của hệ thống. Dưới đây là phân tích đối chiếu chi tiết để hoàn thiện bức tranh thực tế:
-
-```
-                  ┌──────────────────────────────────────────────────────────────┐
-                  │                 BẢN PHÁC THẢO TAY CỦA BẠN                     │
-                  │ (node-cron -> p-limit -> metricBuffer + eventBus -> SSE/AI)  │
-                  └──────────────────────────────┬───────────────────────────────┘
-                                                 │
-                                                 ▼
-┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                             CÁC ĐIỂM CHÍNH XÁC ĐÃ ĐƯỢC GIỮ NGUYÊN                                │
-├──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 1. Scheduler 3 chu kỳ: 30s, 60s, 300s gom monitor theo interval.                                 │
-│ 2. Điều tiết Concurrency: Dùng p-limit(5) + Pacing delay 100ms bảo vệ socket mạng.               │
-│ 3. Hai nhánh xử lý độc lập từ kết quả Ping (Record Result):                                      │
-│    • Nhánh 1 (Metric Ingestion): metricBuffer -> flush (>=100 hoặc 5s) -> bulkInsert & bulkUpdate.│
-│    • Nhánh 2 (Event Dispatch): eventBus.emitPingCompleted -> chuyển tiếp tới SSE & Incidents.    │
-│ 4. Phân luồng sự cố trong Incident Service:                                                      │
-│    • Handle Failure -> Kiểm tra Cache -> Tạo Incident -> Phát Alert -> Đẩy vào AI Queue.         │
-│    • Handle Recovery -> Kiểm tra Cache -> Update Resolve -> Phát Alert kết thúc.                │
-│ 5. Hàng đợi AI ngầm: AI Service nhận task -> Gọi LLM -> Phát alert bổ sung báo cáo sự cố.        │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
-                                                 │
-                                                 ▼
-┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                         CÁC ĐIỂM HOÀN THIỆN & BỔ SUNG TRONG HỆ THỐNG THỰC TẾ                     │
-├──────────────────────────────────────────────────────────────────────────────────────────────────┤
-│ 1. Khóa Chống Chồng Chéo (activeRuns Lock): Nếu chu kỳ 30s trước chưa ping xong do mạng trễ,      │
-│    chu kỳ sau sẽ tự động SKIP, tuyệt đối không tạo hiệu ứng thác lũ (Waterfall Congestion).      │
-│ 2. Cơ chế Fast Retest (2s) chống Báo động giả: Trước khi kết luận target bị Down, worker sẽ nghỉ │
-│    2 giây và thử lại lần thứ 2. Chỉ khi cả 2 lần đều hỏng thì mới xác nhận sự cố.                │
-│ 3. Xả đệm nguyên tử (Atomic Buffer Drain): Dùng `buffer.splice(0)` lấy toàn bộ items ra RAM riêng│
-│    để ghi database. Nếu DB lỗi mạng, nạp ngược lại đầu mảng (`unshift`), không mất 1 dòng log.   │
-│ 4. Phân kỳ cảnh báo 2 pha (2-Phase Alert Architecture):                                          │
-│    • Pha 1 (Tức thì ~0ms): Bắn alert `ongoing` ngay lập tức để Dashboard đổi màu Đỏ và bật      │
-│      Loading Skeleton cho khung AI.                                                              │
-│    • Pha 2 (Sau 2-4s): AI phân tích xong, bắn alert bổ sung payload `aiPostMortem` để tắt        │
-│      Skeleton, điền báo cáo và kích hoạt gửi email SMTP.                                         │
-│ 5. Bảo vệ Cache Stampede (Public Status Page): Khi hàng nghìn khách hàng cùng truy cập trang     │
-│    trạng thái, Promise đang bay (in-flight) được dùng chung, chặn đứng sập database MongoDB.     │
-│ 6. Luồng Frontend End-to-End: Kết nối Native EventSource lắng nghe luồng sự kiện 1 chiều, cập     │
-│    nhật biến động độ trễ trực tiếp lên biểu đồ Recharts mà không phải F5 trang.                   │
-└──────────────────────────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 3. Kiến trúc chi tiết từng phân hệ (Domain Breakdown)
-
-### 3.1. Phân hệ Xác thực & Quản trị Người dùng (Auth, User & RBAC)
-* **JWT Stateless kết hợp HttpOnly Cookie:** Access Token (15m) được lưu trong cookie trình duyệt với cờ `HttpOnly`, `SameSite: strict`, `Secure` trên môi trường production.
-* **Token Versioning (Thu hồi phiên tức thì):** Trường `tokenVersion: number` trên `UserModel` tăng lên 1 khi người dùng đổi mật khẩu hoặc đăng xuất toàn bộ thiết bị. Refresh token cũ lập tức bị từ chối mà không cần blacklist Redis.
-* **Mã xác thực OTP tự hủy:** Quản lý quy trình kích hoạt và quên mật khẩu qua collection `otp_codes` với TTL index 5 phút (`expireAfterSeconds: 300`) do MongoDB tự động purge.
-
-### 3.2. Động cơ Ping định kỳ & Điều tiết lưu lượng (Ping Engine Daemon)
-* **Scheduler:** `node-cron` đăng ký 3 jobs định kỳ chạy 24/7 độc lập với HTTP Request:
-  * `*/30 * * * * *` (Chu kỳ 30 giây)
-  * `0 * * * * *` (Chu kỳ 60 giây)
-  * `0 */5 * * * *` (Chu kỳ 300 giây)
-* **Kiểm soát nghẽn mạng:** Giới hạn tối đa **5 probes song song** qua `p-limit`. Mỗi worker trước khi gửi HTTP request đều dừng lại một nhịp **100ms pacing delay** để tránh làm cạn kiệt socket file descriptors trên Linux VPS 1GB RAM.
-* **Timeout & Anti-False Positive:** Mỗi probe được cấp 10 giây qua `AbortController`. Nếu thất bại lần đầu, hệ thống dừng 2 giây rồi thực hiện retest lần thứ 2 trước khi kết luận mục tiêu bị sập.
-
-### 3.3. Cơ chế Gom cụm & Xả đệm số liệu (Metric Buffer & Bulk Ingestion)
-* **Cắt giảm 90% Disk I/O:** Kết quả ping không lưu lẻ tẻ từng bản ghi. Toàn bộ được gom vào mảng RAM `MetricBuffer`.
-* **Kích hoạt kép (Dual Triggers):**
-  1. *Ngưỡng dung lượng:* Mảng tích lũy đủ $\ge 100$ items.
-  2. *Ngưỡng thời gian:* Timer chạy ngầm mỗi 5 giây (`setInterval(5000)`).
-* **Xả đệm không khóa (Unordered BulkWrite):** Gom nhóm trạng thái mới nhất của từng monitor để cập nhật `status`, `lastCheckedAt` vào `monitors` và chèn log hàng loạt vào `ping_metrics` trong một vòng quay disk duy nhất.
-
-### 3.4. Hệ thống Phát sự kiện Thời gian thực (Real-Time SSE Hub)
-* **Đặc tả luồng một chiều (SSE):** Cho phép client duy trì kết nối persistent stream tới `/api/sse/monitors` bằng native `EventSource`. Hỗ trợ xác thực qua Query param `?token=` do native browser API không gửi được header Authorization.
-* **Connection Pooling:** Lưu trữ `Map<userId, Set<Response>>`. Khi sự kiện ping hoàn thành hoặc có sự cố, hệ thống lọc đúng danh sách kết nối thuộc quyền sở hữu của `userId` đó và đẩy dữ liệu dạng `event: MONITOR_PING\ndata: {...}\n\n`.
-* **Heartbeat Keep-Alive:** Bắn comment `: heartbeat\n\n` mỗi 30 giây để ngăn Reverse Proxy Nginx đóng kết nối idle.
-
-### 3.5. Máy trạng thái Sự cố & Trí tuệ Nhân tạo chẩn đoán (Incident AI Engine)
-* **Máy trạng thái RAM Cache $O(1)$:**
-  * Khóa sự cố: `ongoing_incident:${monitorId}` lưu trong `memoryCache` với `TTL = 0` (tồn tại vĩnh viễn cho đến khi phục hồi).
-  * Khi mục tiêu báo lỗi: Kiểm tra cache trong $0.001\text{ms}$. Nếu đã tồn tại key $\rightarrow$ Bỏ qua (0 query MongoDB, không sinh duplicate incident ticket).
-  * Khi mục tiêu hồi phục: Kiểm tra cache. Nếu có key $\rightarrow$ Lấy ID sự cố, tính toán khoảng thời gian downtime và đánh dấu `status: 'resolved'`.
-* **Kiến trúc AI Pluggable:** Hỗ trợ hoán đổi linh hoạt giữa Groq (LLaMA 3.3 70B) và Google Gemini (Gemini 1.5 Flash). Tác vụ chẩn đoán chạy trong hàng đợi `async.queue` với `concurrency = 2`, tự động trích xuất nguyên nhân gốc rễ và đề xuất hành động dạng JSON.
-
-### 3.6. Trang Trạng thái Công khai & Bộ nhớ đệm Đa tầng (Public Status Page)
-* **Hai tầng Cache (Two-Tier Caching):**
-  1. *Tầng Routing Pointer:* `status_page:slug:${slug}` trỏ tới `userId` (TTL 24 giờ).
-  2. *Tầng Aggregate Metrics:* `status_page:data:${userId}` lưu cấu trúc JSON trang trạng thái, uptime 24h và recent incidents (TTL 30 giây).
-* **Chống nghẽn dòng dữ liệu (Cache Stampede Protection):** Tái sử dụng in-flight Promise qua bảng băm `pendingPromises`. Dù có 10,000 requests đổ về cùng 1 giây khi cache hết hạn, chỉ duy nhất 1 query được bắn vào MongoDB.
-
----
-
-## 4. Hành trình Luồng mã nguồn Chi tiết (Step-by-Step Code Execution Flows)
-
-Dưới đây là 6 kịch bản thực thi thực tế, đi kèm trích đoạn mã nguồn thực tế trong dự án.
-
----
-
-### Kịch bản 1: Khởi động Hệ thống & Làm ấm Bộ nhớ đệm (Bootstrap Lifecycle)
+Nhằm đảm bảo mức tiêu thụ RAM luôn nằm dưới **200MB** cho toàn bộ Node.js process trên VPS 1GB, hệ thống áp dụng chiến lược phân vùng bộ nhớ đệm đa tầng có khóa chống dồn dập (Cache Stampede Protection):
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant S as src/server.ts
-    participant DB as config/db.ts
-    participant Inc as IncidentService
-    participant PE as PingEngine
-    participant Exp as createApp() (Express)
+flowchart LR
+    subgraph RAM_Partitions ["In-Memory RAM Caching (node-cache)"]
+        direction TB
+        Part1["status_page:slug:${slug}<br>TTL = 24 giờ<br>Lưu routing pointer map: slug -> userId"]
+        Part2["status_page:data:${userId}<br>TTL = 30 giây<br>Lưu snapshot tổng hợp: uptime, monitors, incidents"]
+        Part3["ongoing_incident:${monitorId}<br>TTL = 0 (Vô thời hạn)<br>Lưu active incidentId, chỉ xóa khi target phục hồi"]
+        Part4["ping_cooldown:${monitorId}<br>TTL = 15 giây<br>Chống spam endpoint kiểm tra tức thì /monitors/:id/ping"]
+        Part5["pendingPromises Map<br>Stampede Protection Lock<br>Tái sử dụng in-flight promise cho request trùng lặp"]
+    end
 
-    S->>DB: connectDatabase()
-    DB-->>S: MongoDB Connected (Mongoose 7)
-    S->>Inc: incidentService.init()
-    Inc->>DB: incidentRepository.findOngoing()
-    DB-->>Inc: Danh sách các sự cố chưa đóng
-    Inc->>Inc: Nạp memoryCache.set('ongoing_incident:id', incId, 0)
-    S->>PE: pingEngine.start()
-    PE->>PE: Khởi động node-cron (30s, 60s, 300s) & metricBuffer.startTimer(5s)
-    S->>Exp: app.listen(PORT)
-    Exp-->>S: HTTP Server Ready
+    subgraph Triggers ["Invalidation Events (Xóa Cache tức thời)"]
+        direction TB
+        T1["Target gặp sự cố (Down) ──> invalidateCache(userId)"]
+        T2["Target phục hồi (Resolved) ──> invalidateCache(userId)"]
+        T3["Tạo / Cập nhật / Xóa Monitor ──> invalidateCache(userId)"]
+        T4["Đổi Custom Slug ──> invalidateSlug(oldSlug) + invalidateCache(userId)"]
+        T5["Resolve sự cố thủ công ──> memoryCache.del('ongoing_incident:id')"]
+    end
+
+    Triggers --> RAM_Partitions
 ```
 
-#### Trích đoạn mã nguồn thực thi:
-Tại [`src/server.ts`](../backend/src/server.ts):
+---
+
+## 4. Frontend Component & Real-Time State Topology
+
+Giao diện người dùng DevPulse được xây dựng theo mô hình Single Page Application (SPA) với React 18, Vite và Tailwind CSS, giao tiếp thời gian thực hai kênh (Dual-Channel Communication) với Backend:
+
+```mermaid
+flowchart TD
+    subgraph PresentationLayer ["1. App Router & Page Layouts (React Router v7)"]
+        AppLayout["App Layout (Main Shell)<br>• Header / Navigation (User Profile, Slug link)<br>• Network Indicator (Online / Reconnecting)<br>• Global Toaster & Alerts"]
+        LoginPage["/login (Auth Page)"]
+        RegisterPage["/register (Signup Page)"]
+        VerifyOtpPage["/verify-otp (Email Activation & Password Reset)"]
+        DashboardPage["/dashboard (Main System Overview & Charts)"]
+        MonitorsPage["/monitors (Monitors List, Filters, Status Badges)"]
+        MonitorDetailPage["/monitors/:id (Latency History, SSL Status, Action Toolbar)"]
+        IncidentsPage["/incidents (Incident Timeline, AI Post-Mortem Cards)"]
+        PublicStatusPage["/status/:slug (Clean Public Uptime Dashboard)"]
+    end
+
+    subgraph StateAndContext ["2. Client State & Service Layer"]
+        AuthContext["Auth Context<br>• User Identity (id, name, role, slug)<br>• accessToken (RAM Only, chống XSS)<br>• refreshToken handler (HttpOnly cookie)"]
+        MonitorStore["Monitor State Store<br>• Active monitors list<br>• Latency chart time-series buffers<br>• Realtime status map (up/down/paused)"]
+        IncidentStore["Incident State Store<br>• Ongoing outages<br>• AI Post-Mortem reports<br>• Manual resolve handler"]
+    end
+
+    subgraph NetworkLayer ["3. Dual-Channel Network Layer"]
+        AxiosClient["Axios REST Client<br>• baseURL: /api<br>• withCredentials: true<br>• Request Interceptor: Attach Bearer Token<br>• Response Interceptor: 401 Silent Refresh Token Queue"]
+        SSEListener["Native EventSource Stream Hook<br>• URL: /api/sse/monitors?token=${accessToken}<br>• Event: MONITOR_PING -> Update latency buffer<br>• Event: INCIDENT_ALERT -> Update status & AI card<br>• Exponential backoff auto-reconnect"]
+    end
+
+    PresentationLayer --> StateAndContext
+    StateAndContext --> NetworkLayer
+```
+
+---
+
+## 5. Step-by-Step Code-Driven Execution Flows
+
+Dưới đây là hành trình thực thi chi tiết của toàn bộ 10 phân hệ nghiệp vụ, kèm các **mắt xích chuyển tiếp (Execution Bridges)** thể hiện chính xác luồng dữ liệu, cấu trúc tham số truyền qua hàm và lời gọi phương thức giữa các lớp kiến trúc.
+
+---
+
+### Flow 1: Authentication & Dual-Token Rotation
+
+Hệ thống bảo vệ phiên làm việc theo mô hình **Dual-Token Architecture**:
+* **Access Token:** Ký hạn ngắn (15 phút), chứa `id` và `role`, lưu trên RAM của trình duyệt nhằm ngăn ngừa triệt để nguy cơ trích xuất token qua lỗ hổng Cross-Site Scripting (XSS).
+* **Refresh Token:** Ký hạn dài (7 ngày), mã hóa bảo mật lưu trong HttpOnly, Secure, SameSite Cookie. Khi người dùng đổi mật khẩu hoặc đăng xuất toàn bộ thiết bị, trường `tokenVersion` trên model `users` được tăng lũy tiến, lập tức vô hiệu hóa mọi refresh token đang lưu hành.
+
+```
+[Browser Request] ──> [authMiddleware.ts] ──> jwt.verify(JWT_SECRET) ──> req.user = { id, role }
+                                   │ (Nếu Access Token hết hạn)
+                                   ▼
+[Axios 401 Interceptor] ──> POST /api/auth/refresh-token ──> [authService.refreshToken]
+                                   │
+                                   ├── 1. Đọc refreshToken từ req.cookies
+                                   ├── 2. jwt.verify(JWT_REFRESH_SECRET)
+                                   ├── 3. Tra cứu user và so khớp user.tokenVersion === decoded.tokenVersion
+                                   └── 4. Ký cấp Access Token mới + xoay vòng Refresh Token mới
+```
+
 ```typescript
-// File: src/server.ts
-async function bootstrap(): Promise<void> {
-  await connectDatabase();
+// Trích xuất mã nguồn: src/middlewares/authMiddleware.ts
+export function authenticate(req: Request, _res: Response, next: NextFunction): void {
+  const token = extractToken(req);
+  if (!token) {
+    next(new AppError('Authentication token required', 401));
+    return;
+  }
 
-  // Nạp toàn bộ ongoing incidents vào RAM cache để sẵn sàng phát hiện recovery với 0 query DB
-  await incidentService.init();
+  try {
+    const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayloadDecoded;
+    req.user = {
+      id: decoded.id,
+      role: decoded.role,
+    } as AuthenticatedUserPayload;
+    next();
+  } catch {
+    next(new AppError('Invalid or expired authentication token', 401));
+  }
+}
 
-  // Khởi động các cron jobs định kỳ và bộ đếm giờ xả buffer 5 giây
-  pingEngine.start();
-
-  const app = createApp();
-  const server = app.listen(env.PORT, () => {
-    console.log(`[Server] DevPulse Backend running on port ${env.PORT} (${env.NODE_ENV})`);
-  });
-  // ... Cấu hình graceful shutdown (SIGINT, SIGTERM)
+// Hỗ trợ trích xuất cả Header Bearer và Query Parameter (cho Browser EventSource)
+function extractToken(req: Request): string | undefined {
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    return req.headers.authorization.substring(7);
+  }
+  if (typeof req.query.token === 'string' && req.query.token.length > 0) {
+    return req.query.token;
+  }
+  return undefined;
 }
 ```
 
 ---
 
-### Kịch bản 2: Chu kỳ Quét mục tiêu & Xử lý Hai nhánh dữ liệu (Scheduled Health Check Flow)
+### Flow Transition Bridge: Flow 1 to Flow 2
 
 ```mermaid
-flowchart TD
-    CronTick["node-cron Tick (ví dụ: 30s)"] --> CheckRun{"activeRuns.get(30) == true?"}
-    CheckRun -- "Yes: Đang bận" --> LogSkip["Bỏ qua Tick: Chống nghẽn Event Loop"]
-    CheckRun -- "No: Rảnh rỗi" --> SetLock["activeRuns.set(30, true)"]
-
-    SetLock --> QueryMonitors["monitorRepository.findActiveByInterval(30)"]
-    QueryMonitors --> ConcurrencyPool["p-limit(5) Promise Pool"]
-
-    subgraph WorkerProbe ["Tác vụ thăm dò đơn lẻ"]
-        ConcurrencyPool --> Pacing["await setTimeout(100ms) - Pacing"]
-        Pacing --> ExecProbe["pingExecutor.pingTarget(monitor)"]
-        ExecProbe --> Probe1["Thử lần 1 (Timeout: 10s)"]
-        Probe1 -- "Lỗi mạng hoặc HTTP >= 400" --> FastRetest["Sleep 2s & Thử lại lần 2"]
-        FastRetest --> FinalEval{"Đánh giá kết quả cuối"}
-        Probe1 -- "HTTP 2xx / 3xx" --> FinalEval
-    end
-
-    FinalEval --> Record["pingEngine.recordPingResult(monitor, result)"]
-    Record --> Fork1["Nhánh 1: Ghi nhận số liệu"]
-    Record --> Fork2["Nhánh 2: Phát tán thông điệp"]
-
-    Fork1 --> PushRAM["metricBuffer.push(metricItem)"]
-    PushRAM --> CheckCap{"Buffer >= 100 items?"}
-    CheckCap -- "Yes" --> TriggerFlush["metricBuffer.flush()"]
-    CheckCap -- "No" --> WaitTimer["Chờ timer 5s định kỳ"]
-
-    Fork2 --> EmitBus["eventBus.emitPingCompleted(payload)"]
-    EmitBus --> SSEReceiver["realtimeService.broadcastMonitorPing()"]
-    EmitBus --> IncidentReceiver["incidentService.handlePingCompleted()"]
+flowchart LR
+    A["Flow 1: authenticate()<br>req.user = { id: '65f...', role: 'member' }"] -->|"NextFunction()"| B["monitorRoutes.ts<br>POST /api/monitors"]
+    B -->|"req.user!.id, req.body"| C["monitorController.createMonitor()"]
+    C -->|"userId, CreateMonitorDto"| D["Flow 2: monitorService.createMonitor()"]
 ```
 
-#### Trích đoạn mã nguồn thực thi:
-Tại [`src/services/pingEngine.ts`](../backend/src/services/pingEngine.ts):
+Khi request qua `authMiddleware`, `req.user.id` được controller trích xuất trực tiếp truyền vào tầng Service, bảo đảm 100% tài nguyên tạo mới luôn được gán đúng chủ sở hữu (Multi-Tenant Isolation).
+
+---
+
+### Flow 2: Monitor Configuration & Instant Ping Probe
+
+Khi người dùng khởi tạo hoặc hiệu chỉnh endpoint theo dõi:
+1. Nếu URL bắt đầu bằng `https://`, [`monitorService`](../backend/src/services/monitorService.ts) chủ động kích hoạt [`checkSslCertificate`](../backend/src/utils/sslChecker.ts) mở socket TLS với cờ SNI an toàn (`net.isIP(host) ? undefined : host`) để trích xuất tổ chức phát hành (`issuer`), thời hạn (`validTo`) và số ngày còn lại (`daysRemaining`).
+2. Lưu cấu hình vào database và gọi ngay `statusPageService.invalidateCache(userId)` để làm mới dữ liệu public status page.
+3. Nếu người dùng nhấn nút **"Ping Now"**, hệ thống kiểm tra khóa RAM `ping_cooldown:${monitorId}` (15s). Nếu hợp lệ, một lượt ping đo lường được thực thi trực tiếp và lưu vào số đo lịch sử.
+
 ```typescript
-// File: src/services/pingEngine.ts
+// Trích xuất mã nguồn: src/services/monitorService.ts
+export class MonitorService {
+  async createMonitor(userId: string, data: CreateMonitorDto): Promise<MonitorResponseDto> {
+    let sslInfo: ISslInfo | undefined;
+    if (data.url.startsWith('https://')) {
+      sslInfo = await checkSslCertificate(data.url);
+    }
+
+    const newMonitor = await monitorRepository.create({
+      userId: new Types.ObjectId(userId),
+      name: data.name.trim(),
+      url: data.url.trim(),
+      method: data.method || 'GET',
+      headers: data.headers ? new Map(Object.entries(data.headers)) : new Map(),
+      interval: data.interval,
+      isActive: true,
+      status: 'pending',
+      sslInfo,
+    });
+
+    // Vô hiệu hóa cache status page để khách xem trang thấy ngay monitor mới
+    statusPageService.invalidateCache(userId);
+    return this.mapToDto(newMonitor);
+  }
+}
+```
+
+---
+
+### Flow Transition Bridge: Flow 2 to Flow 3
+
+```mermaid
+flowchart LR
+    A["Flow 2: monitorService.createMonitor()<br>status: 'pending', isActive: true, interval: 30"] -->|"Lưu tài liệu"| B[("MongoDB: monitors collection<br>Compound Index: { isActive: 1, interval: 1 }")]
+    B -->|"Chu kỳ 30s tick:<br>findActiveByInterval(30)"| C["Flow 3: pingEngine.runIntervalCycle(30)"]
+```
+
+**Cơ chế chuyển tiếp hoàn toàn phi trạng thái (Stateless Scheduler):**
+Ping Engine không duy trì danh sách monitor trong RAM cố định. Thay vào đó, mỗi khi cron tick (30s, 60s, 300s), phương thức `monitorRepository.findActiveByInterval(interval)` truy vấn trực tiếp vào MongoDB bằng Compound Index `{ isActive: 1, interval: 1 }`. Mọi monitor vừa được tạo hoặc resume ở Flow 2 lập tức được nạp vào lượt ping kế tiếp mà không cần khởi động lại server.
+
+---
+
+### Flow 3: Scheduled Ping Engine & Concurrency Throttling
+
+Tại [`src/services/pingEngine.ts`](../backend/src/services/pingEngine.ts), 3 tác vụ `node-cron` chạy tuần hoàn tương ứng với các chu kỳ 30 giây, 60 giây và 300 giây.
+1. `this.activeRuns.get(interval)` đóng vai trò là ổ khóa ngăn ngừa chu kỳ mới đè lên chu kỳ cũ khi mạng bên ngoài bị chậm.
+2. `pLimit(5)` khống chế tối đa 5 requests ping được gửi ra Internet song song.
+3. Kẹp `pacingDelayMs = 100` giải phóng CPU và tránh làm bão hòa bảng socket state của kernel Linux.
+4. [`pingExecutor.ts`](../backend/src/services/pingExecutor.ts) gửi probe với `AbortController` (10s timeout). Nếu gặp lỗi (4xx, 5xx, Timeout, Connection Refused), probe tự động hoãn 2000ms và thực hiện **Fast Retest lần 2** để loại trừ 100% tình trạng sụt mạng tạm thời (chống báo động giả).
+
+```typescript
+// Trích xuất mã nguồn: src/services/pingEngine.ts
 private async runIntervalCycle(interval: 30 | 60 | 300): Promise<void> {
   if (this.activeRuns.get(interval)) {
-    console.warn(`[PingEngine] Previous cycle for interval ${interval}s is still running. Skipping.`);
-    return;
+    return; // Bỏ qua nếu chu kỳ trước chưa hoàn thành
   }
   this.activeRuns.set(interval, true);
 
@@ -332,7 +407,7 @@ private async runIntervalCycle(interval: 30 | 60 | 300): Promise<void> {
     const activeMonitors = await monitorRepository.findActiveByInterval(interval);
     if (activeMonitors.length === 0) return;
 
-    // Giới hạn tối đa 5 tasks chạy đồng thời, xen kẽ 100ms pacing delay
+    // Giới hạn concurrency tối đa 5 và chèn độ trễ nhịp 100ms
     const pingPromises = activeMonitors.map((monitor) =>
       this.limit(async () => {
         await new Promise((resolve) => setTimeout(resolve, this.pacingDelayMs));
@@ -347,112 +422,168 @@ private async runIntervalCycle(interval: 30 | 60 | 300): Promise<void> {
 }
 ```
 
-Và tại [`src/services/metricBuffer.ts`](../backend/src/services/metricBuffer.ts):
+---
+
+### Flow Transition Bridge: Flow 3 to Flow 4 & Event Bus
+
+```mermaid
+flowchart TD
+    A["Flow 3: pingEngine.processSingleMonitor(monitor)"] -->|"pingExecutor.pingTarget(monitor)"| B["PingExecutionResult<br>{ statusCode, latency, isUp, checkedAt, error }"]
+    B --> C["pingEngine.recordPingResult(monitor, result)"]
+    C -->|"1. metricBuffer.push(item)"| D["Flow 4: In-Memory RAM Buffer<br>(Chờ đạt 100 items hoặc Timer 5s)"]
+    C -->|"2. eventBus.emitPingCompleted(payload)"| E["Internal EventBus Hub"]
+    E -->|"onPingCompleted"| F["Flow 5: incidentService (State Machine)"]
+    E -->|"onPingCompleted"| G["Flow 7: realtimeService (SSE Broadcast)"]
+```
+
+Đây là mắt xích phân tách trách nhiệm quan trọng nhất trong hệ thống: Sau khi hoàn thành probe, kết quả được rẽ làm 2 nhánh hoàn toàn độc lập: **Nhánh lưu trữ số đo (Flow 4)** và **Nhánh phát sự kiện thời gian thực (Flow 5 & Flow 7)**.
+
 ```typescript
-// File: src/services/metricBuffer.ts
-async flush(): Promise<number> {
-  if (this.isFlushing || this.buffer.length === 0) return 0;
-
-  this.isFlushing = true;
-  // Rút toàn bộ dữ liệu ra một mảng cục bộ độc lập (Atomic Drain)
-  const itemsToFlush = this.buffer.splice(0);
-
+// Trích xuất mã nguồn mắt xích chuyển tiếp: src/services/pingEngine.ts
+async processSingleMonitor(monitor: IMonitor): Promise<void> {
   try {
-    // 1. Chèn hàng loạt metrics vào Time-Series Collection
-    await pingMetricRepository.bulkInsert(itemsToFlush);
-
-    // 2. Gom trạng thái mới nhất của từng monitor và cập nhật hàng loạt bảng monitors
-    const latestUpdates = new Map<string, { status: MonitorStatus; lastCheckedAt: Date }>();
-    for (const item of itemsToFlush) {
-      latestUpdates.set(item.monitorId.toString(), {
-        status: item.isUp ? 'up' : 'down',
-        lastCheckedAt: item.timestamp,
-      });
-    }
-    if (latestUpdates.size > 0) {
-      await monitorRepository.bulkUpdateStatus(latestUpdates);
-    }
-    return itemsToFlush.length;
+    const result = await pingExecutor.pingTarget(monitor);
+    await this.recordPingResult(monitor, result);
   } catch (error) {
-    // Hoàn trả dữ liệu về đầu hàng đợi nếu gặp lỗi kết nối DB
-    this.buffer.unshift(...itemsToFlush);
-    return 0;
-  } finally {
-    this.isFlushing = false;
+    console.error(`[PingEngine] Failed to process monitor ${monitor._id}:`, error);
+  }
+}
+
+async recordPingResult(monitor: IMonitor, result: PingExecutionResult): Promise<void> {
+  // Chuyển tiếp sang Flow 4: Gom buffer RAM
+  await metricBuffer.push({
+    timestamp: result.checkedAt,
+    monitorId: monitor._id,
+    statusCode: result.statusCode,
+    latency: result.latency,
+    isUp: result.isUp,
+    error: result.error,
+  });
+
+  // Chuyển tiếp sang Flow 5 & Flow 7: Phát sự kiện nội bộ
+  eventBus.emitPingCompleted({
+    monitorId: monitor._id.toString(),
+    userId: monitor.userId.toString(),
+    statusCode: result.statusCode,
+    latency: result.latency,
+    isUp: result.isUp,
+    timestamp: result.checkedAt.toISOString(),
+    error: result.error,
+  });
+}
+```
+
+---
+
+### Flow 4: In-Memory Metric Buffer & Batch Ingestion
+
+Mỗi kết quả ping không ghi lẻ tẻ vào cơ sở dữ liệu mà được đẩy vào mảng bộ nhớ đệm [`metricBuffer.ts`](../backend/src/services/metricBuffer.ts):
+1. **Điều kiện xả (Flush):** Đạt 100 items trong RAM hoặc bộ đếm thời gian 5000ms điểm nhịp.
+2. **Cô lập mảng:** Dùng `const itemsToFlush = this.buffer.splice(0)` rút cạn mảng nguyên tử, cho phép các lượt ping mới tiếp tục đẩy vào buffer mà không xảy ra xung đột luồng (Thread-safe concurrency).
+3. **Thực thi BulkWrite:** Ghi hàng loạt số đo vào `ping_metrics` và tổng hợp trạng thái mới nhất (`up` / `down`) để cập nhật vào `monitors` chỉ bằng **1 thao tác mạng duy nhất**.
+
+```typescript
+// Trích xuất mã nguồn: src/services/metricBuffer.ts
+export class MetricBuffer {
+  private buffer: CreatePingMetricDto[] = [];
+  private flushTimer: NodeJS.Timeout | null = null;
+  private readonly batchSizeLimit = 100;
+  private readonly flushIntervalMs = 5000;
+
+  // Khởi động timer nền xả buffer mỗi 5 giây
+  startTimer(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setInterval(async () => {
+      await this.flush();
+    }, this.flushIntervalMs);
+  }
+
+  // Đẩy metric vào RAM buffer và kích hoạt flush ngay nếu chạm trần dung lượng
+  async push(metric: CreatePingMetricDto): Promise<void> {
+    this.buffer.push(metric);
+    if (this.buffer.length >= this.batchSizeLimit) {
+      await this.flush();
+    }
+  }
+
+  async flush(): Promise<number> {
+    if (this.isFlushing || this.buffer.length === 0) return 0;
+    this.isFlushing = true;
+    const itemsToFlush = this.buffer.splice(0); // Rút cạn mảng nguyên tử
+
+    try {
+      // 1. Bulk insert vào Time-Series collection ping_metrics
+      await pingMetricRepository.bulkInsert(itemsToFlush);
+
+      // 2. Gom trạng thái mới nhất cho mỗi monitor để bulk update
+      const latestUpdates = new Map<string, { status: MonitorStatus; lastCheckedAt: Date }>();
+      for (const item of itemsToFlush) {
+        latestUpdates.set(item.monitorId.toString(), {
+          status: item.isUp ? 'up' : 'down',
+          lastCheckedAt: item.timestamp,
+        });
+      }
+
+      if (latestUpdates.size > 0) {
+        await monitorRepository.bulkUpdateStatus(latestUpdates);
+      }
+
+      this.lastFlushAt = new Date();
+      return itemsToFlush.length;
+    } catch (error) {
+      this.buffer.unshift(...itemsToFlush);
+      return 0;
+    } finally {
+      this.isFlushing = false;
+    }
   }
 }
 ```
 
 ---
 
-### Kịch bản 3: Phát hiện Sự cố & Phân kỳ Cảnh báo 2 Pha (Outage & 2-Phase AI Alert Flow)
-
-Khi một website khách hàng bị sập, hệ thống chia phản ứng thành 2 giai đoạn riêng biệt nhằm tối ưu hóa trải nghiệm UI của người dùng trên Dashboard.
+### Flow Transition Bridge: Event Bus to Flow 5 & Flow 7
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant PE as PingEngine
-    participant EB as EventBus
-    participant IS as IncidentService
-    participant RAM as memoryCache
-    participant DB as MongoDB
-    participant AIQ as aiService.queue
-    participant LLM as Groq / Gemini API
-    participant SSE as RealtimeService (SSE)
-    participant FE as Frontend Dashboard
-    participant Mail as emailService
-
-    PE->>EB: emitPingCompleted({ isUp: false, error: '502 Bad Gateway' })
-    EB->>IS: onPingCompleted listener
-    IS->>RAM: has('ongoing_incident:monitorId')
-    RAM-->>IS: false (Sự cố mới chớm nở)
-
-    IS->>DB: incidentRepository.create({ status: 'ongoing', errorDetails })
-    DB-->>IS: newIncident (_id: 65fa...)
-    IS->>RAM: set('ongoing_incident:monitorId', '65fa...', 0)
-
-    Note over IS,FE: PHA 1: BÁO ĐỘNG TỨC THÌ (~0ms)
-    IS->>EB: emitIncidentAlert({ incidentId: '65fa...', status: 'ongoing', aiPostMortem: undefined })
-    EB->>SSE: broadcastIncidentAlert()
-    SSE->>FE: event: INCIDENT_ALERT (status: ongoing, skeleton: true)
-    Note right of FE: Target Badge chuyển sang ĐỎ<br>Khung AI Post-Mortem hiện Loading Skeleton
-
-    IS->>AIQ: queueIncidentAnalysis(task)
-    
-    Note over AIQ,FE: PHA 2: CHẨN ĐOÁN & THÔNG BÁO BỔ SUNG (2-4s)
-    AIQ->>LLM: generatePostMortem(errorDump)
-    LLM-->>AIQ: JSON: { summary, rootCause, actionItems }
-    AIQ->>DB: incidentRepository.updateAiPostMortem('65fa...', postMortem)
-    AIQ->>EB: emitIncidentAlert({ incidentId: '65fa...', status: 'ongoing', aiPostMortem: {...} })
-    EB->>SSE: broadcastIncidentAlert()
-    SSE->>FE: event: INCIDENT_ALERT (status: ongoing, aiPostMortem: {...})
-    Note right of FE: Tắt Loading Skeleton<br>Render 3 thẻ thông tin: Tóm tắt, Nguyên nhân, Giải pháp
-
-    AIQ->>Mail: sendIncidentAlertEmail(user.email, postMortem)
-    Mail-->>Mail: Gửi email cảnh báo khẩn cấp tới chủ sở hữu
+flowchart TD
+    A["eventBus.emitPingCompleted(payload)"] --> B{"EventBus Hub (EventEmitter)"}
+    B -->|"Listener 1: onPingCompleted"| C["Flow 5: incidentService.handlePingCompleted(payload)"]
+    B -->|"Listener 2: onPingCompleted"| D["Flow 7: realtimeService.broadcastMonitorPing(payload)"]
 ```
 
-#### Trích đoạn mã nguồn thực thi:
-Tại [`src/services/incidentService.ts`](../backend/src/services/incidentService.ts):
+Sự kiện `PING_COMPLETED` được truyền phát theo mô hình **Pub/Sub phi ghép nối (Decoupled Publish/Subscribe)**. Ping Engine hoàn toàn không cần biết `incidentService` hay `realtimeService` là ai, triệt tiêu hoàn toàn sự phụ thuộc vòng giữa các module.
+
+---
+
+### Flow 5: Event Bus & Incident State Machine
+
+[`incidentService.ts`](../backend/src/services/incidentService.ts) lắng nghe sự kiện `PING_COMPLETED` qua [`eventBus.ts`](../backend/src/utils/eventBus.ts):
+* **Khi Target gặp lỗi (`isUp === false`):**
+  Kiểm tra cache `ongoing_incident:${monitorId}`:
+  - Nếu đã tồn tại key: Mục tiêu đang trong đợt downtime đã được ghi nhận $\rightarrow$ Bỏ qua với độ phức tạp $O(1)$ trên RAM, **0 truy vấn DB**.
+  - Nếu chưa có: Tạo mới document sự cố trong MongoDB, lưu `incidentId` vào cache RAM (`TTL = 0`), lập tức bắn sự kiện `INCIDENT_ALERT` (Phase 1: Giao diện chuyển đỏ) và đẩy tác vụ sang hàng đợi AI.
+* **Khi Target phục hồi (`isUp === true`):**
+  Kiểm tra cache `ongoing_incident:${monitorId}`:
+  - Nếu không có key: Mục tiêu khỏe mạnh bình thường $\rightarrow$ Bỏ qua $O(1)$, **0 truy vấn DB**.
+  - Nếu có key: Đóng sự cố trong database, xóa key cache, tính tổng thời gian gián đoạn và phát tán sự kiện phục hồi (Phase 3).
+
 ```typescript
-// File: src/services/incidentService.ts
+// Trích xuất mã nguồn: src/services/incidentService.ts
 private async handleTargetFailure(payload: PingCompletedEvent): Promise<void> {
   const cacheKey = `${ONGOING_INCIDENT_CACHE_PREFIX}${payload.monitorId}`;
-  
-  // O(1) Memory Check: Nếu sự cố đã được ghi nhận trước đó, bỏ qua để tránh trùng lặp ticket
   if (memoryCache.has(cacheKey)) {
-    return;
+    return; // Đang trong đợt downtime -> 0 hit DB
   }
 
   const monitor = await monitorRepository.findById(payload.monitorId);
   if (!monitor) return;
 
   const incident = await incidentRepository.create({
-    monitorId: new Types.ObjectId(payload.monitorId),
+    monitorId: monitor._id,
     userId: monitor.userId,
     status: 'ongoing',
     startedAt: new Date(payload.timestamp),
+    resolvedAt: null,
     errorDetails: {
       statusCode: payload.statusCode,
       errorMessage: payload.error || 'Health check probe failed',
@@ -461,10 +592,10 @@ private async handleTargetFailure(payload: PingCompletedEvent): Promise<void> {
     },
   });
 
-  // Khóa trạng thái sự cố vĩnh viễn trong RAM cho đến khi mục tiêu hồi phục (TTL = 0)
+  // Lưu active incidentId vào RAM cache vô thời hạn cho tới khi phục hồi
   memoryCache.set(cacheKey, incident._id.toString(), 0);
 
-  // PHA 1: Bắn cảnh báo ngay lập tức để Dashboard đổi màu đỏ và hiện skeleton loading
+  // Giai đoạn 1: Bắn alert ngay lập tức để dashboard chuyển trạng thái ĐỎ
   eventBus.emitIncidentAlert({
     incidentId: incident._id.toString(),
     monitorId: payload.monitorId,
@@ -474,7 +605,9 @@ private async handleTargetFailure(payload: PingCompletedEvent): Promise<void> {
     errorMessage: payload.error,
   });
 
-  // Đẩy tác vụ chẩn đoán AI vào hàng đợi xử lý ngầm (Concurrency = 2)
+  statusPageService.invalidateCache(payload.userId);
+
+  // Đẩy sang hàng đợi chẩn đoán AI ngầm (Flow 6)
   aiService.queueIncidentAnalysis({
     incidentId: incident._id.toString(),
     monitorId: monitor._id.toString(),
@@ -490,125 +623,182 @@ private async handleTargetFailure(payload: PingCompletedEvent): Promise<void> {
 
 ---
 
-### Kịch bản 4: Mục tiêu Phục hồi Hoạt động & Đóng sự cố (Service Recovery Flow)
+### Flow Transition Bridge: Flow 5 to Flow 6
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant PE as PingEngine
-    participant EB as EventBus
-    participant IS as IncidentService
-    participant RAM as memoryCache
-    participant DB as MongoDB
-    participant SSE as RealtimeService
-    participant FE as Frontend Dashboard
-    participant Mail as emailService
-
-    PE->>EB: emitPingCompleted({ isUp: true, statusCode: 200 })
-    EB->>IS: onPingCompleted listener
-    IS->>RAM: get('ongoing_incident:monitorId')
-    RAM-->>IS: Trả về incidentId ('65fa...')
-    
-    IS->>DB: incidentRepository.resolveIncident('65fa...', resolvedAt)
-    DB-->>IS: updatedIncident
-    IS->>RAM: del('ongoing_incident:monitorId')
-    Note over IS,RAM: Mở khóa RAM Cache: Các lần ping lỗi trong tương lai có thể tạo incident mới
-
-    IS->>EB: emitIncidentAlert({ incidentId: '65fa...', status: 'resolved', resolvedAt })
-    EB->>SSE: broadcastIncidentAlert()
-    SSE->>FE: event: INCIDENT_ALERT (status: resolved)
-    Note right of FE: Target Badge chuyển sang XANH (Up)<br>Incident Timeline hiển thị thời gian kết thúc
-
-    IS->>Mail: sendIncidentResolvedEmail(user.email, downtimeDuration)
-    Mail-->>Mail: Gửi email xác nhận hồi phục kèm tổng thời gian gián đoạn
+flowchart LR
+    A["Flow 5: incidentService.handleTargetFailure()"] -->|"aiService.queueIncidentAnalysis(task)"| B["aiService.queue (async.queue, conc=2)"]
+    B -->|"Worker dequeues task"| C["Flow 6: aiService.processTask(task)"]
 ```
 
-#### Trích đoạn mã nguồn thực thi:
-Tại [`src/services/incidentService.ts`](../backend/src/services/incidentService.ts):
+Tác vụ gọi Generative AI API được đẩy vào hàng đợi bất đồng bộ có giới hạn worker = 2, bảo vệ tiến trình Node.js không bị treo khi hàng chục website cùng sập một lúc.
+
+---
+
+### Flow 6: Pluggable AI Post-Mortem & Email Alerts
+
+[`aiService.ts`](../backend/src/services/aiService.ts) sử dụng `async.queue` với `concurrency = 2` để đảm bảo không làm nghẽn CPU và bộ nhớ:
+1. Trừu tượng hóa qua giao diện [`IAiProvider`](../backend/src/services/ai/aiProvider.ts), hỗ trợ chuyển đổi linh hoạt qua biến môi trường giữa **Groq (LLaMA 3.3 70B)** và **Gemini (Gemini 1.5 Flash)**.
+2. Sử dụng chế độ ép kiểu JSON chuẩn (`JSON Mode`) để AI trả về đúng cấu trúc gồm 3 trường: `summary` (tóm tắt hiện tượng), `rootCause` (nguyên nhân gốc rễ dự đoán), và `actionItems` (các bước khắc phục đề xuất).
+3. Cập nhật báo cáo vào database, phát sự kiện Phase 2 để giao diện tắt loading skeleton và hiển thị thẻ chẩn đoán AI, đồng thời đẩy email sang [`emailService`](../backend/src/services/emailService.ts).
+
 ```typescript
-// File: src/services/incidentService.ts
-private async handleTargetRecovery(payload: PingCompletedEvent): Promise<void> {
-  const cacheKey = `${ONGOING_INCIDENT_CACHE_PREFIX}${payload.monitorId}`;
-  const ongoingIncidentId = memoryCache.get<string>(cacheKey);
-
-  // Nếu trong RAM không có sự cố đang diễn ra, chứng tỏ website vốn đã hoạt động bình thường -> Bỏ qua
-  if (!ongoingIncidentId) {
-    return;
-  }
-
-  const resolvedDate = new Date(payload.timestamp);
-  const resolvedIncident = await incidentRepository.resolveIncident(ongoingIncidentId, resolvedDate);
-
-  // Xóa key sự cố khỏi bộ nhớ đệm
-  memoryCache.del(cacheKey);
-
-  if (!resolvedIncident) return;
-
-  // Phát tán sự kiện phục hồi tới toàn bộ SSE clients
-  eventBus.emitIncidentAlert({
-    incidentId: resolvedIncident._id.toString(),
-    monitorId: payload.monitorId,
-    userId: payload.userId,
-    status: 'resolved',
-    startedAt: resolvedIncident.startedAt.toISOString(),
-    resolvedAt: payload.timestamp,
+// Trích xuất mã nguồn: src/services/aiService.ts
+private async processTask(task: AiTask): Promise<void> {
+  const postMortem = await this.generatePostMortem({
+    targetUrl: task.monitorUrl,
+    statusCode: task.statusCode,
+    errorMessage: task.errorMessage,
+    responseBody: task.responseBody,
   });
 
-  // Tính toán thời gian downtime và gửi email thông báo hồi phục cho khách hàng
-  const monitor = await monitorRepository.findById(payload.monitorId);
-  const user = await userRepository.findById(payload.userId);
-  if (monitor && user) {
-    const durationMs = resolvedDate.getTime() - resolvedIncident.startedAt.getTime();
-    emailService.sendIncidentResolvedEmail(
-      user.email,
-      monitor.name,
-      monitor.url,
-      resolvedIncident.startedAt.toISOString(),
-      resolvedDate.toISOString(),
-      this.formatDuration(durationMs)
-    );
+  if (postMortem) {
+    const generatedAt = new Date();
+    await incidentRepository.updateAiPostMortem(task.incidentId, {
+      summary: postMortem.summary,
+      rootCause: postMortem.rootCause,
+      actionItems: postMortem.actionItems,
+      generatedAt,
+    });
+
+    // Giai đoạn 2: Bắn alert cập nhật kèm báo cáo AI hoàn chỉnh sang Flow 7
+    eventBus.emitIncidentAlert({
+      incidentId: task.incidentId,
+      monitorId: task.monitorId,
+      userId: task.userId,
+      status: 'ongoing',
+      startedAt: task.startedAt,
+      errorMessage: task.errorMessage,
+      aiPostMortem: {
+        summary: postMortem.summary,
+        rootCause: postMortem.rootCause,
+        actionItems: postMortem.actionItems,
+        generatedAt: generatedAt.toISOString(),
+      },
+    });
+
+    // Chuyển tiếp sang emailService để gửi thư cảnh báo
+    const user = await userRepository.findById(task.userId);
+    if (user) {
+      emailService.sendIncidentAlertEmail(
+        user.email,
+        task.monitorName,
+        task.monitorUrl,
+        task.errorMessage,
+        task.startedAt,
+        postMortem
+      );
+    }
   }
 }
 ```
 
 ---
 
-### Kịch bản 5: Truy vấn Public Status Page & Chống Thắt nút Cổ chai (Stampede-Protected Flow)
+### Flow Transition Bridge: Event Bus to Flow 7
 
 ```mermaid
 flowchart TD
-    Guest["Khách vãng lai truy cập GET /api/status/:slug"] --> CheckSlugCache{"RAM Cache có<br>status_page:slug:slug?"}
-    
-    CheckSlugCache -- "Hit" --> GetUserId["Lấy userId từ RAM"]
-    CheckSlugCache -- "Miss" --> QuerySlugDB["userRepository.findBySlug(slug)"]
-    QuerySlugDB --> SaveSlugCache["Ghi RAM: status_page:slug:slug (TTL 24h)"]
-    SaveSlugCache --> GetUserId
-
-    GetUserId --> CheckDataCache{"RAM Cache có<br>status_page:data:userId?"}
-    CheckDataCache -- "Hit" --> ReturnDirect["Trả về HTTP 200 JSON ngay lập tức<br>(Thời gian phản hồi < 2ms - 0 query DB)"]
-
-    CheckDataCache -- "Miss" --> CheckInFlight{"Có Promise tính toán<br>đang bay (in-flight) không?"}
-    CheckInFlight -- "Có" --> AwaitPromise["Dùng chung Promise của request trước<br>(Chống dồn tải Stampede)"]
-    CheckInFlight -- "Chưa" --> ExecAggregate["Thực thi fetchStatusPageData(userId)"]
-
-    ExecAggregate --> ParallelDB["Promise.all([<br>  monitorRepository.findActiveByUser(),<br>  pingMetricRepository.calculateUptime24h(),<br>  incidentRepository.findRecentForStatusPage()<br>])"]
-    ParallelDB --> CalcStatus["Tính toán System Status (all_operational / partial / major)"]
-    CalcStatus --> SaveDataCache["Ghi RAM: status_page:data:userId (TTL 30s)"]
-    SaveDataCache --> ReturnDirect
-    AwaitPromise --> ReturnDirect
+    A["Event Sources:<br>• pingEngine: emitPingCompleted<br>• incidentService: emitIncidentAlert (Phase 1, Recovery)<br>• aiService: emitIncidentAlert (Phase 2)"] --> B["eventBus.ts"]
+    B --> C["Flow 7: realtimeService.ts"]
+    C -->|"1. connections.get(userId)"| D["Set<Response> Pool"]
+    D -->|"2. res.write('event: ...\ndata: ...\n\n')"| E["Browser EventSource Stream"]
 ```
 
-#### Trích đoạn mã nguồn thực thi:
-Tại [`src/utils/cache.ts`](../backend/src/utils/cache.ts):
+---
+
+### Flow 7: Real-Time Server-Sent Events Streaming
+
+[`realtimeService.ts`](../backend/src/services/realtimeService.ts) quản lý bể chứa kết nối trên RAM dạng `Map<userId, Set<Response>>`:
+1. Khi trình duyệt gọi `GET /api/sse/monitors?token=...`, [`sseController.ts`](../backend/src/controllers/sseController.ts) thiết lập các headers cấm đệm:
+   - `Content-Type: text/event-stream`
+   - `Cache-Control: no-cache, no-transform`
+   - `X-Accel-Buffering: no`
+   - Gọi ngay `res.flushHeaders()`.
+2. Gửi heartbeat comment `: heartbeat\n\n` định kỳ 30s bằng `unref()` timer để giữ kết nối không bị Nginx proxy ngắt.
+3. Khi nhận sự kiện từ `eventBus`, hệ thống lọc chính xác các kết nối thuộc sở hữu của `userId` và ghi dữ liệu SSE trực tiếp qua `res.write()`.
+
 ```typescript
-// File: src/utils/cache.ts
+// Trích xuất mã nguồn: src/services/realtimeService.ts
+export class RealtimeService {
+  private connections: Map<string, Set<Response>> = new Map();
+
+  addConnection(userId: string, res: Response): void {
+    let clientSet = this.connections.get(userId);
+    if (!clientSet) {
+      clientSet = new Set<Response>();
+      this.connections.set(userId, clientSet);
+    }
+    clientSet.add(res);
+  }
+
+  broadcastMonitorPing(payload: PingCompletedEvent): void {
+    const clientSet = this.connections.get(payload.userId);
+    if (!clientSet || clientSet.size === 0) return;
+
+    const eventData: SseMonitorPingEvent = {
+      type: 'MONITOR_PING',
+      monitorId: payload.monitorId,
+      statusCode: payload.statusCode,
+      latency: payload.latency,
+      isUp: payload.isUp,
+      timestamp: payload.timestamp,
+      error: payload.error,
+    };
+
+    const message = `event: MONITOR_PING\ndata: ${JSON.stringify(eventData)}\n\n`;
+    for (const res of clientSet) {
+      if (!res.writableEnded) {
+        res.write(message);
+      }
+    }
+  }
+
+  broadcastIncidentAlert(payload: IncidentAlertEvent): void {
+    const clientSet = this.connections.get(payload.userId);
+    if (!clientSet || clientSet.size === 0) return;
+
+    const message = `event: INCIDENT_ALERT\ndata: ${JSON.stringify(payload)}\n\n`;
+    for (const res of clientSet) {
+      if (!res.writableEnded) {
+        res.write(message);
+      }
+    }
+  }
+}
+```
+
+---
+
+### Flow Transition Bridge: State Mutation to Flow 8
+
+```mermaid
+flowchart TD
+    A["Mutations:<br>• Flow 2: Create/Update/Delete/Toggle Monitor<br>• Flow 5: Outage Detected / Recovered / Manual Resolved"] -->|"statusPageService.invalidateCache(userId)"| B["memoryCache.del('status_page:data:' + userId)"]
+    B --> C["RAM Cache Invalidated"]
+    D["Visitor: GET /api/status/:slug"] --> E["Flow 8: getStatusPageBySlug(slug)"]
+    E -->|"Cache Miss"| F["fetchStatusPageData(userId)<br>Tính lại uptime 24h & gom recent incidents"]
+    F -->|"Recache 30s"| G["Cập nhật lại RAM Cache"]
+```
+
+---
+
+### Flow 8: Public Status Page & Cache Stampede Protection
+
+Khách vãng lai truy cập `GET /api/status/:slug` hoàn toàn không cần đăng nhập. Để chịu được hàng chục nghìn lượt truy cập đồng thời khi dịch vụ sập nguồn (traffic spike) mà không làm sập MongoDB:
+1. **Tầng 1 (Slug Lookup):** Tra cứu `status_page:slug:${slug}` (TTL 24h) để lấy `userId`.
+2. **Tầng 2 (Data Aggregate):** Lấy dữ liệu từ `status_page:data:${userId}` (TTL 30s).
+3. **Cache Stampede Protection:** [`MemoryCacheService.getOrSet`](../backend/src/utils/cache.ts) sử dụng một `pendingPromises` Map. Nếu 100 requests cùng ùa vào lúc cache vừa hết hạn, chỉ duy nhất 1 truy vấn thực tế được gửi xuống MongoDB; 99 requests còn lại sẽ dùng chung kết quả của Promise đang bay (In-flight promise deduplication).
+
+```typescript
+// Trích xuất mã nguồn: src/utils/cache.ts
 async getOrSet<T>(key: string, fetchFn: () => Promise<T>, ttlSeconds?: number): Promise<T> {
   const cached = this.get<T>(key);
   if (cached !== undefined) {
     return cached;
   }
 
-  // Nếu một request khác đã bắt đầu truy vấn DB cho key này, nhập chung vào Promise đó
+  // Tái sử dụng Promise đang chạy nếu có request trùng lặp
   const inFlight = this.pendingPromises.get(key) as Promise<T> | undefined;
   if (inFlight) {
     return inFlight;
@@ -631,121 +821,37 @@ async getOrSet<T>(key: string, fetchFn: () => Promise<T>, ttlSeconds?: number): 
 
 ---
 
-### Kịch bản 6: Kiến trúc Giao diện Frontend & Đồng bộ Phản ứng Thời gian thực (Frontend Reactive Sync)
+### Flow 9: Admin System Supervision & Engine Diagnostics
 
-Trên giao diện React SPA (Vite + Tailwind CSS), client kết nối Server-Sent Events ngay khi đăng nhập để nhận dữ liệu thời gian thực và cập nhật giao diện mà không cần reload trang.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Page as React App (Dashboard)
-    participant Hook as useSSE Hook
-    participant ES as Native EventSource
-    participant API as /api/sse/monitors?token=jwt
-    participant Store as React State (Zustand / Context)
-    participant UI as Dashboard View (Cards, Charts)
-
-    Page->>Hook: Mount Dashboard
-    Hook->>ES: new EventSource('/api/sse/monitors?token=' + accessToken)
-    ES->>API: HTTP GET (Stream connection)
-    API-->>ES: HTTP 200 + text/event-stream
-    API-->>ES: event: CONNECTED
-    ES-->>Hook: onmessage (Status: Live)
-
-    loop Khi có lượt ping mới hoàn tất
-        API-->>ES: event: MONITOR_PING\ndata: { monitorId, latency, isUp, timestamp }
-        ES->>Hook: parse JSON payload
-        Hook->>Store: appendPingMetric(monitorId, { latency, timestamp })
-        Store->>UI: Re-render Uptime Chart (Recharts cập nhật đỉnh xung độ trễ)
-    end
-
-    loop Khi mục tiêu bị sập hoặc hồi phục
-        API-->>ES: event: INCIDENT_ALERT\ndata: { incidentId, monitorId, status, aiPostMortem }
-        ES->>Hook: parse JSON payload
-        Hook->>Store: updateMonitorStatus(monitorId, status)
-        Store->>UI: Đổi màu thẻ Monitor (Xanh <-> Đỏ) & Cập nhật danh sách Incident
-    end
-```
-
-#### Kiến trúc Code Frontend Client (Mẫu triển khai chuẩn React):
-```typescript
-// Frontend: src/hooks/useRealtimeSSE.ts
-import { useEffect } from 'react';
-import { useMonitorStore } from '../stores/monitorStore';
-
-export function useRealtimeSSE(token: string | null) {
-  const { handlePingUpdate, handleIncidentAlert } = useMonitorStore();
-
-  useEffect(() => {
-    if (!token) return;
-
-    // Khởi tạo stream SSE với token đính kèm trên URL
-    const eventSource = new EventSource(`/api/sse/monitors?token=${encodeURIComponent(token)}`);
-
-    eventSource.addEventListener('MONITOR_PING', (event: MessageEvent) => {
-      const data = JSON.parse(event.data);
-      // Cập nhật điểm latency mới nhất vào biểu đồ thời gian thực
-      handlePingUpdate(data);
-    });
-
-    eventSource.addEventListener('INCIDENT_ALERT', (event: MessageEvent) => {
-      const data = JSON.parse(event.data);
-      // Đổi màu badge monitor, hiển thị toast alert hoặc nạp phân tích AI
-      handleIncidentAlert(data);
-    });
-
-    eventSource.onerror = () => {
-      // Trình duyệt tự động reconnect theo đặc tả chuẩn SSE
-      console.warn('[SSE] Connection interrupted. Reconnecting...');
-    };
-
-    return () => {
-      eventSource.close();
-    };
-  }, [token]);
-}
-```
+Quản trị viên hệ thống có quyền truy cập endpoint bảo vệ cao cấp:
+1. `GET /api/admin/overview`: [`adminService.ts`](../backend/src/services/adminService.ts) tổng hợp nhanh:
+   - Tổng số tài khoản, phân loại số lượng user verified vs unverified.
+   - Thống kê toàn diện monitors: tổng số, số active, số paused, và phân loại trạng thái up/down/pending.
+   - Số lượng sự cố đang diễn ra (`ongoing`) và sự cố đã giải quyết trong 24 giờ qua.
+   - Thông số RAM sử dụng của Node.js process (`process.memoryUsage()`) và trạng thái máy chủ (uptime OS, CPU cores, load average).
+2. `GET /api/admin/engine`: Trả về trạng thái nội bộ của Ping Engine: số lượng active monitors được nạp, kích thước buffer hiện tại trong RAM, thời điểm xả gần nhất và concurrency limit.
+3. `POST /api/admin/engine/flush`: Kích hoạt ép xả toàn bộ buffer RAM xuống MongoDB ngay lập tức.
 
 ---
 
-## 5. Hạn mức Tài nguyên & Phòng vệ trên Linux VPS 1GB RAM
+### Flow 10: Frontend SPA State & Real-Time Synchronization
 
-Hệ thống được thiết kế đo ni đóng giày để vận hành ổn định trên VPS cấu hình thấp (1 vCPU, 1GB RAM) với Docker Compose:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                      PHÂN BỔ BỘ NHỚ RAM TRÊN LINUX VPS 1GB                     │
-├────────────────────────────────┬───────────────────┬────────────────────────────┤
-│ THÀNH PHẦN                     │ HẠN MỨC TỐI ĐA    │ KỸ THUẬT PHÒNG VỆ          │
-├────────────────────────────────┼───────────────────┼────────────────────────────┤
-│ Node.js Backend Container      │ 256 MB            │ • Max Old Space Size: 200MB│
-│                                │                   │ • p-limit(5) concurrency   │
-│                                │                   │ • 100ms socket pacing      │
-│                                │                   │ • Buffer bulkWrite (5s)    │
-├────────────────────────────────┼───────────────────┼────────────────────────────┤
-│ MongoDB 7.0 Container          │ 256 MB            │ • WiredTiger Cache: 128MB  │
-│                                │                   │ • Time-Series auto-purge   │
-├────────────────────────────────┼───────────────────┼────────────────────────────┤
-│ Nginx Reverse Proxy Container  │ 32 MB             │ • X-Accel-Buffering: no    │
-│                                │                   │ • Lightweight worker_proc  │
-├────────────────────────────────┼───────────────────┼────────────────────────────┤
-│ OS Linux + System Buffers/Swap │ ~450 MB           │ • 1GB Swap File dự phòng   │
-│                                │                   │ • vm.swappiness = 10       │
-└────────────────────────────────┴───────────────────┴────────────────────────────┘
-```
+Tại tầng giao diện React 18, ứng dụng quản lý trạng thái đồng bộ:
+1. **Lớp Dịch vụ API (`src/services/api.ts`):** Cấu hình Axios instance tự động gửi kèm cookie và kẹp Access Token vào header `Authorization`.
+2. **Hook Lắng nghe SSE (`useRealtimeEvents`):** 
+   - Khởi tạo kết nối `new EventSource('/api/sse/monitors?token=' + token)`.
+   - Lắng nghe event `MONITOR_PING`: Tìm monitor tương ứng trong mảng state, cập nhật lại trạng thái (`status: 'up' | 'down'`), cập nhật latency gần nhất và đẩy điểm dữ liệu mới vào biểu đồ đường Recharts.
+   - Lắng nghe event `INCIDENT_ALERT`: Nếu nhận sự cố `ongoing`, lập tức cập nhật badge cảnh báo đỏ của monitor, hiển thị banner thông báo sự cố trên top dashboard và hiển thị component `AiPostMortemCard` (nếu có trường `aiPostMortem`, tắt skeleton loading).
+3. **Cơ chế Reconnect Tự động:** Khi mất kết nối mạng hoặc server khởi động lại, EventSource tự động kết nối lại theo cơ chế Exponential Backoff mà không làm mất trạng thái đang hiển thị của người dùng.
 
 ---
 
-## 6. Tổng kết Định vị File Mã nguồn (File Registry)
+## 6. Resource Budget & Production Capacity Matrix
 
-| Phân hệ / Trách nhiệm | File Mã nguồn Backend | File Giao diện Frontend |
+| Thành phần | Tiêu thụ Tài nguyên (VPS 1GB RAM) | Cơ chế Đảm bảo Ổn định |
 | :--- | :--- | :--- |
-| **System Bootstrap** | [`src/server.ts`](../backend/src/server.ts) $\rightarrow$ [`src/app.ts`](../backend/src/app.ts) | [`src/main.tsx`](../frontend/src/main.tsx) $\rightarrow$ [`src/App.tsx`](../frontend/src/App.tsx) |
-| **Xác thực & Người dùng** | [`src/services/authService.ts`](../backend/src/services/authService.ts) $\rightarrow$ [`src/services/userService.ts`](../backend/src/services/userService.ts) | `src/pages/LoginPage.tsx`, `src/pages/RegisterPage.tsx` |
-| **Ping Engine Daemon** | [`src/services/pingEngine.ts`](../backend/src/services/pingEngine.ts) $\rightarrow$ [`src/services/pingExecutor.ts`](../backend/src/services/pingExecutor.ts) | N/A (Tiến trình máy chủ nền) |
-| **Xả đệm số liệu** | [`src/services/metricBuffer.ts`](../backend/src/services/metricBuffer.ts) $\rightarrow$ [`src/repositories/pingMetricRepository.ts`](../backend/src/repositories/pingMetricRepository.ts) | `src/components/charts/LatencyChart.tsx` |
-| **Truyền phát SSE** | [`src/services/realtimeService.ts`](../backend/src/services/realtimeService.ts) $\rightarrow$ [`src/controllers/sseController.ts`](../backend/src/controllers/sseController.ts) | `src/hooks/useRealtimeSSE.ts` |
-| **Sự cố & Trí tuệ AI** | [`src/services/incidentService.ts`](../backend/src/services/incidentService.ts) $\rightarrow$ [`src/services/aiService.ts`](../backend/src/services/aiService.ts) | `src/pages/IncidentsPage.tsx`, `src/components/AiPostMortemCard.tsx` |
-| **Public Status Page** | [`src/services/statusPageService.ts`](../backend/src/services/statusPageService.ts) $\rightarrow$ [`src/controllers/statusPageController.ts`](../backend/src/controllers/statusPageController.ts) | `src/pages/StatusPage.tsx` |
-| **EventBus nội bộ** | [`src/utils/eventBus.ts`](../backend/src/utils/eventBus.ts) | N/A (Kiến trúc nội bộ Node.js) |
-| **RAM Cache & Stampede**| [`src/utils/cache.ts`](../backend/src/utils/cache.ts) | N/A |
+| **Node.js Process** | RAM: 90MB - 160MB / CPU: 2% - 8% | Chạy đơn tiến trình với `p-limit(5)` và `async.queue(2)` |
+| **MongoDB Container** | RAM: 180MB - 240MB / IOPS: Thấp | Gom batch `bulkWrite` và Time-Series Collection |
+| **Network Sockets** | Tối đa 5 outbound connections đồng thời | Pacing delay 100ms và `AbortController(10s)` |
+| **Realtime SSE** | ~2KB RAM cho mỗi client kết nối | Dọn dẹp $O(1)$ trên RAM khi kết nối đóng, Heartbeat 30s |
+| **Public Status Page** | < 2ms latency khi hit cache | Caching 2 tầng + Stampede lock, 0 hit database |
