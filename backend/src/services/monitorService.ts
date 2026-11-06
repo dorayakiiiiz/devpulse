@@ -79,7 +79,7 @@ export class MonitorService {
       sslInfo,
     });
 
-    void statusPageService.invalidateCacheForUser(userId);
+    statusPageService.invalidateCache(userId);
     return this.mapToDto(newMonitor);
   }
 
@@ -121,7 +121,7 @@ export class MonitorService {
     if (data.interval !== undefined) monitor.interval = data.interval;
 
     await monitor.save();
-    void statusPageService.invalidateCacheForUser(userId);
+    statusPageService.invalidateCache(userId);
     return this.mapToDto(monitor);
   }
 
@@ -136,7 +136,7 @@ export class MonitorService {
     monitor.status = monitor.isActive ? 'pending' : 'paused';
 
     await monitor.save();
-    void statusPageService.invalidateCacheForUser(userId);
+    statusPageService.invalidateCache(userId);
     return this.mapToDto(monitor);
   }
 
@@ -153,7 +153,7 @@ export class MonitorService {
     await incidentRepository.deleteByMonitor(monitorId);
     await pingMetricRepository.deleteByMonitor(monitorId);
 
-    void statusPageService.invalidateCacheForUser(userId);
+    statusPageService.invalidateCache(userId);
   }
 
   // Execute an instant on-demand ping verification subject to cooldown and rate limiting

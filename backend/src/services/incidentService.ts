@@ -117,7 +117,7 @@ export class IncidentService {
     });
 
     // Invalidate public status page cache immediately upon outage detection
-    void statusPageService.invalidateCacheForUser(payload.userId);
+    statusPageService.invalidateCache(payload.userId);
 
     // Push task into AI background queue for automated diagnosis and email alert
     aiService.queueIncidentAnalysis({
@@ -163,7 +163,7 @@ export class IncidentService {
     });
 
     // Invalidate public status page cache upon target recovery
-    void statusPageService.invalidateCacheForUser(payload.userId);
+    statusPageService.invalidateCache(payload.userId);
 
     const monitor = await monitorRepository.findById(payload.monitorId);
     const user = await userRepository.findById(payload.userId);
@@ -226,12 +226,13 @@ export class IncidentService {
     }
 
     // Evict ongoing incident from memory cache so subsequent failures can register new incidents
-    const cacheKey = `${ONGOING_INCIDENT_CACHE_PREFIX}${incident.monitorId}`;
+    const monitor = incident.monitorId as IMonitor;
+    const cacheKey = `${ONGOING_INCIDENT_CACHE_PREFIX}${monitor._id}`;
     memoryCache.del(cacheKey);
 
     eventBus.emitIncidentAlert({
       incidentId: incident._id.toString(),
-      monitorId: incident.monitorId.toString(),
+      monitorId: monitor._id.toString(),
       userId,
       status: 'resolved',
       startedAt: incident.startedAt.toISOString(),
@@ -239,7 +240,7 @@ export class IncidentService {
     });
 
     // Invalidate public status page cache upon manual incident resolution
-    void statusPageService.invalidateCacheForUser(userId);
+    statusPageService.invalidateCache(userId);
 
     return this.mapToDto(updated);
   }
@@ -251,8 +252,8 @@ export class IncidentService {
       throw new AppError('Incident not found', 404);
     }
 
-    const monitor = await monitorRepository.findById(incident.monitorId.toString());
-    const targetUrl = monitor ? monitor.url : 'Unknown target';
+    const monitor = incident.monitorId as IMonitor;
+    const targetUrl = monitor.url;
 
     const postMortem = await aiService.generatePostMortem({
       targetUrl,
@@ -278,7 +279,7 @@ export class IncidentService {
 
     eventBus.emitIncidentAlert({
       incidentId: incident._id.toString(),
-      monitorId: incident.monitorId.toString(),
+      monitorId: monitor._id.toString(),
       userId,
       status: 'ongoing',
       startedAt: incident.startedAt.toISOString(),

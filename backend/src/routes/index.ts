@@ -6,8 +6,7 @@ import userRoutes from './userRoutes.js';
 import monitorRoutes from './monitorRoutes.js';
 import incidentRoutes from './incidentRoutes.js';
 import sseRoutes from './sseRoutes.js';
-import adminPingRoutes from './adminPingRoutes.js';
-import adminStatusPageRoutes from './adminStatusPageRoutes.js';
+import adminRoutes from './adminRoutes.js';
 import { authenticate } from '../middlewares/authMiddleware.js';
 import { requireAdmin } from '../middlewares/roleMiddleware.js';
 
@@ -25,7 +24,6 @@ router.use('/incidents', authenticate, incidentRoutes);
 router.use('/sse', authenticate, sseRoutes);
 
 // Administrative endpoints requiring authentication and admin role
-router.use('/admin/ping-engine', authenticate, requireAdmin, adminPingRoutes);
-router.use('/admin/status-page', authenticate, requireAdmin, adminStatusPageRoutes);
+router.use('/admin', authenticate, requireAdmin, adminRoutes);
 
 export default router;

@@ -3,13 +3,13 @@
 - Module: System
 - Người phụ trách: Fullstack Developer
 - Ngày soạn: 2026-10-29
-- Trạng thái: Draft
+- Trạng thái: Implemented
 
 ---
 
 ## 1. Business Objectives
 
-Cung cấp điểm kết nối kiểm tra sức khỏe tự động phục vụ cơ chế tự giám sát và tự khởi động lại của Docker container trên máy chủ Linux VPS. Đồng thời, thiết lập điểm kết nối quản trị áp dụng cơ chế kiểm soát truy cập dựa trên vai trò để cung cấp số liệu tổng quan về tình trạng phần cứng, kích thước bộ đệm và trạng thái vận hành của toàn bộ nền tảng DevPulse cho tài khoản quản trị viên.
+Cung cấp điểm kết nối kiểm tra sức khỏe tự động phục vụ cơ chế tự giám sát và tự khởi động lại của Docker container trên máy chủ Linux VPS. Đồng thời, thiết lập điểm kết nối quản trị tập trung áp dụng cơ chế kiểm soát truy cập dựa trên vai trò để cung cấp số liệu tổng quan về tình trạng phần cứng, kích thước bộ đệm và trạng thái vận hành của toàn bộ nền tảng DevPulse cho tài khoản quản trị viên.
 
 ---
 
@@ -18,8 +18,9 @@ Cung cấp điểm kết nối kiểm tra sức khỏe tự động phục vụ 
 **Trong scope:**
 - Cung cấp điểm kết nối công khai `GET /api/health` trả về trạng thái kết nối cơ sở dữ liệu MongoDB, mức tiêu thụ bộ nhớ heap và thời gian hoạt động liên tục của tiến trình máy chủ.
 - Tích hợp kiểm tra định kỳ trong Dockerfile và Docker Compose để tự động đánh dấu trạng thái bộ chứa là khỏe mạnh hoặc gặp sự cố.
-- Cung cấp điểm kết nối quản trị `GET /api/admin/overview` yêu cầu nghiêm ngặt vai trò `admin`.
-- Tổng hợp số liệu thống kê vĩ mô: tổng số người dùng, tổng số mục tiêu theo dõi, số lượng mục tiêu đang hoạt động.
+- Cung cấp điểm kết nối quản trị tập trung `GET /api/admin/overview` yêu cầu nghiêm ngặt vai trò `admin`.
+- Cung cấp điểm kết nối kiểm tra trạng thái bộ đệm metric `GET /api/admin/ping-engine/status` và cưỡng chế xả bộ đệm `POST /api/admin/ping-engine/flush`.
+- Tổng hợp số liệu thống kê vĩ mô: tổng số người dùng, tổng số mục tiêu theo dõi, số lượng mục tiêu đang hoạt động, số lượng sự cố chưa giải quyết.
 - Giám sát trạng thái bộ lập lịch và kích thước bộ đệm RAM hiện tại của mô-đun Ping Engine.
 - Đo lường chi tiết mức độ sử dụng bộ nhớ RAM của tiến trình Node.js gồm heapUsed, heapTotal và rss.
 
@@ -35,8 +36,8 @@ Cung cấp điểm kết nối kiểm tra sức khỏe tự động phục vụ 
 | Role | Quyền |
 | :--- | :--- |
 | Anonymous User | Có quyền gọi điểm kết nối kiểm tra sức khỏe `/api/health` mà không cần xác thực. Bị từ chối khi gọi điểm kết nối quản trị. |
-| Member | Có quyền gọi `/api/health`. Bị từ chối truy cập điểm kết nối `/api/admin/overview` với mã lỗi HTTP 403. |
-| Admin | Toàn quyền truy xuất cả hai điểm kết nối kiểm tra sức khỏe và số liệu tổng quan hệ thống. |
+| Member | Có quyền gọi `/api/health`. Bị từ chối truy cập điểm kết nối quản trị `/api/admin/*` với mã lỗi HTTP 403. |
+| Admin | Toàn quyền truy xuất cả điểm kết nối kiểm tra sức khỏe và các điểm kết nối quản trị hệ thống. |
 
 ---
 
@@ -44,13 +45,13 @@ Cung cấp điểm kết nối kiểm tra sức khỏe tự động phục vụ 
 
 ### 4.1. Automated Health Check Flow
 1. Trình giám sát bộ chứa của Docker gửi yêu cầu kiểm tra định kỳ mỗi 30 giây đến đường dẫn `/api/health`.
-2. Dịch vụ máy chủ thực hiện lệnh kiểm tra kết nối nội bộ đến cơ sở dữ liệu MongoDB.
+2. Dịch vụ máy chủ thực hiện lệnh kiểm tra kết nối nội bộ đến cơ sở dữ liệu MongoDB (`admin().ping()`).
 3. Đọc thông số thời gian hoạt động liên tục và mức tiêu thụ bộ nhớ từ môi trường thực thi Node.js.
 4. Trường hợp cơ sở dữ liệu phản hồi tốt:
-   - Máy chủ trả về mã HTTP 200 kèm nội dung xác nhận hệ thống khỏe mạnh.
+   - Máy chủ trả về mã HTTP 200 kèm nội dung xác nhận hệ thống khỏe mạnh (`status: 'ok'`).
    - Docker ghi nhận trạng thái bộ chứa là `healthy`.
 5. Trường hợp mất kết nối cơ sở dữ liệu:
-   - Máy chủ trả về mã HTTP 503 Service Unavailable.
+   - Máy chủ trả về mã HTTP 503 Service Unavailable (`status: 'error'`).
    - Docker ghi nhận trạng thái bộ chứa là `unhealthy` và tự động kích hoạt khởi động lại bộ chứa nếu cấu hình chính sách tự phục hồi.
 
 ### 4.2. Admin Overview Retrieval Flow
@@ -61,6 +62,7 @@ Cung cấp điểm kết nối kiểm tra sức khỏe tự động phục vụ 
 5. Hệ thống thực thi các câu lệnh đếm dữ liệu song song nhằm tối ưu thời gian phản hồi:
    - Đếm tổng số tài khoản trong collection `users`.
    - Đếm tổng số mục tiêu và số mục tiêu có `isActive: true` trong collection `monitors`.
+   - Đếm số lượng sự cố chưa giải quyết (`status: 'ongoing'`) trong collection `incidents`.
    - Lấy kích thước bộ đệm RAM hiện tại và thời điểm xả dữ liệu gần nhất từ dịch vụ Ping Engine.
    - Lấy các chỉ số bộ nhớ từ môi trường thực thi.
 6. Hệ thống đóng gói toàn bộ dữ liệu vào cấu trúc phản hồi chuẩn và gửi về cho trình duyệt.
@@ -71,15 +73,17 @@ Cung cấp điểm kết nối kiểm tra sức khỏe tự động phục vụ 
 
 | Method | Endpoint | Auth | Mô tả |
 | :--- | :--- | :--- | :--- |
-| GET | `/api/health` | None | Kiểm tra sức khỏe hệ thống và kết nối database |
+| GET | `/api/health` | None | Kiểm tra sức khỏe hệ thống và đo latency kết nối database |
 | GET | `/api/admin/overview` | Admin | Lấy thông số vận hành tổng thể của toàn hệ thống |
+| GET | `/api/admin/ping-engine/status` | Admin | Lấy trạng thái vận hành và kích thước bộ đệm metric |
+| POST | `/api/admin/ping-engine/flush` | Admin | Cưỡng chế xả toàn bộ metric từ bộ đệm vào MongoDB |
 
 **Request and Response Payloads:**
 
 ```typescript
 // GET /api/health - Response
 export interface HealthCheckResponse {
-  status: 'ok' | 'degraded' | 'error';
+  status: 'ok' | 'error';
   timestamp: string;
   uptimeSeconds: number;
   database: {
@@ -103,7 +107,7 @@ export interface AdminOverviewResponse {
   };
   pingEngine: {
     bufferSize: number;
-    lastFlushAt: string;
+    lastFlushAt: string | null;
     concurrencyLimit: number;
   };
   systemMemory: {

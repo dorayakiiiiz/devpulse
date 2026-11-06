@@ -37,7 +37,7 @@ Cung cấp trang thông tin trạng thái công khai cho phép khách hàng và 
 | :--- | :--- |
 | Anonymous User | Toàn quyền xem trang trạng thái công khai thông qua đường dẫn slug. |
 | Member | Xem trang trạng thái công khai của chính mình hoặc của các tổ chức khác. |
-| Admin | Toàn quyền xem và có quyền gọi lệnh xóa bộ nhớ đệm trang trạng thái thủ công. |
+| Admin | Toàn quyền xem trang trạng thái công khai. |
 
 ---
 
@@ -46,23 +46,28 @@ Cung cấp trang thông tin trạng thái công khai cho phép khách hàng và 
 ### 4.1. Public Status Page Retrieval Flow
 1. Người dùng cuối truy cập đường dẫn `/status/:slug` trên trình duyệt web.
 2. Ứng dụng gọi điểm kết nối `GET /api/status/:slug`.
-3. Hệ thống kiểm tra dữ liệu trong bộ nhớ đệm RAM với khóa `status_page:${slug}`.
-4. Trường hợp trúng bộ nhớ đệm:
-   - Hệ thống trả về dữ liệu tức thì trong thời gian dưới 2 mili giây kèm tiêu đề `Cache-Control`.
-5. Trường hợp trượt bộ nhớ đệm:
-   - Hệ thống tra cứu thông tin định danh người dùng theo `slug`.
-   - Lấy danh sách các mục tiêu theo dõi đang kích hoạt kèm trạng thái hiện thời.
-   - Truy vấn lịch sử 5 sự cố gần nhất từ collection `incidents`.
-   - Tính toán tỷ lệ hoạt động 24 giờ qua dựa trên số lượng lượt kiểm tra thành công.
-   - Tổng hợp trạng thái toàn hệ thống: Hoạt động bình thường, Gián đoạn một phần hoặc Gián đoạn nghiêm trọng.
-   - Lưu trữ dữ liệu tổng hợp vào `node-cache` với thời gian tồn tại 30 giây.
-   - Trả về dữ liệu cho trình duyệt.
+3. Hệ thống kiểm tra khóa định tuyến trong bộ nhớ đệm RAM: `status_page:slug:${slug}` (TTL 24h).
+   - Nếu trúng đệm: Lấy trực tiếp `userId` tương ứng mà không cần truy vấn database.
+   - Nếu trượt đệm: Tra cứu `userRepository.findBySlug(slug)`, ghi đệm `userId` vào `status_page:slug:${slug}`.
+4. Hệ thống kiểm tra dữ liệu trạng thái trong bộ nhớ đệm RAM: `status_page:data:${userId}` (TTL 30s).
+   - Nếu trúng đệm: Trả về dữ liệu tức thì trong thời gian dưới 1 mili giây kèm tiêu đề `Cache-Control`.
+   - Nếu trượt đệm:
+     - Lấy danh sách các mục tiêu theo dõi đang kích hoạt kèm trạng thái hiện thời của `userId`.
+     - Truy vấn lịch sử 5 sự cố gần nhất từ collection `incidents`.
+     - Tính toán tỷ lệ hoạt động 24 giờ qua dựa trên số lượng lượt kiểm tra thành công.
+     - Tổng hợp trạng thái toàn hệ thống: Hoạt động bình thường, Gián đoạn một phần hoặc Gián đoạn nghiêm trọng.
+     - Lưu trữ dữ liệu tổng hợp vào `node-cache` với khóa `status_page:data:${userId}` (TTL 30s).
+     - Trả về dữ liệu cho trình duyệt.
 
 ### 4.2. Cache Invalidation Flow
-1. Khi mô-đun Incidents phát hiện một mục tiêu chuyển sang trạng thái Down hoặc Resolved:
-2. Hệ thống xác định `slug` của người dùng sở hữu mục tiêu đó.
-3. Kích hoạt lệnh xóa khóa `status_page:${slug}` khỏi `node-cache`.
-4. Yêu cầu truy cập kế tiếp sẽ được nạp lại dữ liệu mới nhất từ cơ sở dữ liệu thay vì chờ hết chu kỳ 30 giây.
+1. Khi có sự kiện thay đổi trạng thái monitor hoặc incident:
+   - Tạo mới incident, cập nhật incident, hoặc giải quyết sự cố (`incidentService`).
+   - Tạo mới, cập nhật, hoặc xóa monitor (`monitorService`).
+2. Hệ thống gọi phương thức đồng bộ `statusPageService.invalidateCache(userId)` để xóa khóa `status_page:data:${userId}` trong RAM với **0 truy vấn database**.
+3. Khi người dùng thay đổi slug hoặc xóa tài khoản (`userService`):
+   - Hệ thống gọi `statusPageService.invalidateSlug(oldSlug)` để xóa con trỏ định tuyến.
+   - Đồng thời gọi `statusPageService.invalidateCache(userId)` để xóa dữ liệu đệm cũ.
+4. Yêu cầu truy cập kế tiếp sẽ tự động nạp lại dữ liệu mới nhất từ cơ sở dữ liệu và ghi đệm mới.
 
 ---
 
@@ -70,8 +75,7 @@ Cung cấp trang thông tin trạng thái công khai cho phép khách hàng và 
 
 | Method | Endpoint | Auth | Mô tả |
 | :--- | :--- | :--- | :--- |
-| GET | `/api/status/:slug` | None | Lấy dữ liệu trang trạng thái công khai theo định danh |
-| POST | `/api/admin/status-page/clear-cache/:slug` | Admin | Xóa bộ nhớ đệm trang trạng thái thủ công |
+| GET | `/api/status/:slug` | None | Lấy dữ liệu trang trạng thái công khai theo định danh slug |
 
 **Request and Response Payloads:**
 
@@ -80,7 +84,7 @@ Cung cấp trang thông tin trạng thái công khai cho phép khách hàng và 
 export interface PublicMonitorStatus {
   name: string;
   url: string;
-  status: 'up' | 'down';
+  status: MonitorStatus;
   uptimePercentage24h: number;
   lastCheckedAt: string | null;
 }
@@ -92,7 +96,8 @@ export interface PublicIncidentItem {
   status: 'ongoing' | 'resolved';
   startedAt: string;
   resolvedAt: string | null;
-  summary: string;
+  errorMessage: string;
+  aiSummary?: string;
 }
 
 // GET /api/status/:slug - Response
@@ -110,8 +115,6 @@ export interface PublicStatusPageResponse {
 | Code | Khi nào trả về |
 | :--- | :--- |
 | 200 | Lấy dữ liệu trang trạng thái thành công |
-| 401 | Thiếu quyền khi gọi điểm kết nối xóa bộ nhớ đệm của quản trị viên |
-| 403 | Không đủ quyền quản trị viên |
 | 404 | Không tìm thấy trang trạng thái theo mã slug cung cấp |
 
 ---

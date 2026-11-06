@@ -13,13 +13,3 @@ export async function getStatusPage(req: Request, res: Response, next: NextFunct
   }
 }
 
-// Clear in-memory status page cache entry for designated slug (Admin only)
-export function clearStatusPageCache(req: Request, res: Response, next: NextFunction): void {
-  try {
-    statusPageService.clearCache(req.params.slug);
-    sendSuccess(res, null, 'Status page cache cleared successfully');
-  } catch (error) {
-    next(error);
-  }
-}
-

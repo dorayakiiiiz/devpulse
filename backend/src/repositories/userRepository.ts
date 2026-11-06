@@ -35,11 +35,6 @@ export class UserRepository extends BaseRepository<IUser> {
     return this.updateById(userId, { $set: updateFields });
   }
 
-  // Update user display name
-  async updateName(userId: string, name: string): Promise<IUser | null> {
-    return this.updateById(userId, { $set: { name } });
-  }
-
   // Atomically increment token version to invalidate active refresh tokens
   async incrementTokenVersion(userId: string): Promise<IUser | null> {
     return this.updateById(userId, { $inc: { tokenVersion: 1 } });

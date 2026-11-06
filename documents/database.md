@@ -24,9 +24,11 @@ Collection quản lý user identity và RBAC role trong hệ thống.
   "_id": "ObjectId",
   "name": "String",
   "email": "String",
+  "slug": "String",
   "passwordHash": "String",
   "role": "String",
   "isVerified": "Boolean",
+  "tokenVersion": "Number",
   "createdAt": "Date",
   "updatedAt": "Date"
 }
@@ -37,18 +39,23 @@ Collection quản lý user identity và RBAC role trong hệ thống.
 | `_id` | ObjectId | Yes | Primary key của document. |
 | `name` | String | Yes | Tên hiển thị của người dùng (2 - 50 ký tự). |
 | `email` | String | Yes | Email duy nhất dùng để đăng nhập. |
+| `slug` | String | Yes | Định danh URL duy nhất dùng cho public status page (`/status/:slug`). |
 | `passwordHash` | String | Yes | Password hash được băm bằng bcrypt. |
 | `role` | String | Yes | Role phân quyền, thuộc enum cố định gồm member hoặc admin, mặc định là member. |
 | `isVerified` | Boolean | Yes | Trạng thái xác thực tài khoản qua email OTP, mặc định là false. |
+| `tokenVersion` | Number | Yes | Phiên bản token dùng để thu hồi refresh tokens khi đổi mật khẩu, mặc định là 0. |
 | `createdAt` | Date | Yes | Timestamp tạo tài khoản. |
 | `updatedAt` | Date | Yes | Timestamp cập nhật thông tin tài khoản gần nhất. |
 
 **Validation Constraints:**
 - `role`: Kiểu String, enum gồm `member` và `admin`, default là `member`.
 - `isVerified`: Kiểu Boolean, default là `false`.
+- `slug`: Kiểu String, unique, regex `/^[a-z0-9]+(?:-[a-z0-9]+)*$/`.
+- `tokenVersion`: Kiểu Number, default là `0`.
 
 **Indexes:**
 - `{ email: 1 }`: Unique index phục vụ query đăng nhập và ngăn chặn duplicate email.
+- `{ slug: 1 }`: Unique index phục vụ tra cứu public status page theo slug.
 
 ---
 
@@ -146,6 +153,7 @@ Collection ghi nhận lịch sử các lần downtime và AI incident post-morte
 {
   "_id": "ObjectId",
   "monitorId": "ObjectId",
+  "userId": "ObjectId",
   "status": "String",
   "startedAt": "Date",
   "resolvedAt": "Date",
@@ -170,6 +178,7 @@ Collection ghi nhận lịch sử các lần downtime và AI incident post-morte
 | :--- | :--- | :--- | :--- |
 | `_id` | ObjectId | Yes | Primary key của document. |
 | `monitorId` | ObjectId | Yes | Foreign key tham chiếu đến monitor gặp sự cố trong `monitors`. |
+| `userId` | ObjectId | Yes | Foreign key tham chiếu đến `users._id` sở hữu monitor phục vụ tenant isolation. |
 | `status` | String | Yes | Trạng thái sự cố, nhận giá trị ongoing hoặc resolved. |
 | `startedAt` | Date | Yes | Timestamp bắt đầu ghi nhận sự cố. |
 | `resolvedAt` | Date | No | Timestamp monitor phục hồi hoạt động bình thường. |
@@ -180,6 +189,7 @@ Collection ghi nhận lịch sử các lần downtime và AI incident post-morte
 
 **Indexes:**
 - `{ monitorId: 1, startedAt: -1 }`: Compound index tra cứu incident timeline của monitor.
+- `{ userId: 1, createdAt: -1 }`: Compound index tra cứu danh sách incidents theo người dùng.
 - `{ status: 1 }`: Query nhanh các ongoing incidents để kiểm tra điều kiện recovery.
 
 ---

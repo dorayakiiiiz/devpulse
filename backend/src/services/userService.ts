@@ -52,8 +52,9 @@ export class UserService {
           throw new AppError('Status page slug is already in use by another account', 409);
         }
         updateData.slug = normalizedSlug;
-        // Invalidate previous slug cache
-        statusPageService.clearCache(user.slug);
+        // Invalidate status page routing and data cache for previous slug and user
+        statusPageService.invalidateSlug(user.slug);
+        statusPageService.invalidateCache(userId);
       }
     }
 
@@ -95,6 +96,10 @@ export class UserService {
     if (!isMatch) {
       throw new AppError('Incorrect password. Account deletion aborted.', 400);
     }
+
+    // Invalidate public status page routing and data cache
+    statusPageService.invalidateSlug(user.slug);
+    statusPageService.invalidateCache(userId);
 
     // Retrieve monitors to evict memory caches and remove associated time-series metrics
     const monitors = await monitorRepository.findByUser(userId);
