@@ -2,19 +2,34 @@ import type { Config } from 'tailwindcss';
 
 const config: Config = {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  darkMode: 'class',
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['DM Sans', 'sans-serif'],
+      },
+      spacing: {
+        '18': '4.5rem',
+      },
       colors: {
-        background: '#090d16',
-        card: '#101726',
-        border: '#1e293b',
-        primary: {
-          DEFAULT: '#3b82f6',
-          hover: '#2563eb',
-        },
-        success: '#10b981',
-        warning: '#f59e0b',
-        danger: '#ef4444',
+        cream: '#f5efe3',
+        coral: '#ff6b6b',
+        'coral-soft': '#ffc5c2',
+        mint: '#78d8c5',
+        'retro-blue': '#79a7d3',
+        'retro-lilac': '#b8a1d9',
+        'retro-orange': '#e89b55',
+        'retro-olive': '#a8ad65',
+        'retro-night': '#171a24',
+        'retro-panel': '#252a38',
+        'retro-sage': '#d9ef9f',
+      },
+      boxShadow: {
+        retro: '3px 3px 0 #18181b',
+        'retro-md': '4px 4px 0 #18181b',
+        'retro-lg': '10px 10px 0 #18181b',
+        'retro-dark': '4px 4px 0 #090b10',
+        'retro-focus': '4px 4px 0 #65d6c4',
       },
     },
   },
@@ -22,4 +37,3 @@ const config: Config = {
 };
 
 export default config;
-

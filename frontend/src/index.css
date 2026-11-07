@@ -2,14 +2,68 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: dark;
+@layer base {
+  body {
+    @apply min-w-80 bg-cream font-sans antialiased;
+  }
+
+  button,
+  select {
+    @apply cursor-pointer;
+  }
+
+  button:disabled {
+    @apply cursor-not-allowed;
+  }
 }
 
-body {
-  margin: 0;
-  background-color: #030712;
-  color: #f9fafb;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+@layer utilities {
+  .toast-progress {
+    animation: toast-countdown 3.2s linear forwards;
+    transform-origin: left;
+  }
+
+  .retro-scrollbar {
+    scrollbar-color: #79a7d3 #f5efe3;
+    scrollbar-width: thin;
+  }
+
+  .retro-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .retro-scrollbar::-webkit-scrollbar-track {
+    background: #f5efe3;
+    border-left: 1px solid #18181b;
+  }
+
+  .retro-scrollbar::-webkit-scrollbar-thumb {
+    background: #79a7d3;
+    border: 2px solid #18181b;
+  }
+
+  .dark .retro-scrollbar {
+    scrollbar-color: #737c91 #171a24;
+  }
+
+  .dark .retro-scrollbar::-webkit-scrollbar-track {
+    background: #171a24;
+    border-color: #737c91;
+  }
+
+  .dark .retro-scrollbar::-webkit-scrollbar-thumb {
+    background: #737c91;
+    border-color: #171a24;
+  }
 }
 
+@keyframes toast-countdown {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}

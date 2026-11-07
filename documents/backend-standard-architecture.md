@@ -984,7 +984,188 @@ this.queue = async.queue<EmailTask>(async (task) => {
 
 ---
 
-## 10. Reusable Project Bootstrap Checklist
+---
+
+## 10. Realtime Event Streaming Architecture: Server-Sent Events (SSE) vs. WebSockets
+
+Trong các hệ thống giám sát hạ tầng (APM / Uptime Monitoring), dữ liệu cần được đẩy tức thời (Push) từ máy chủ xuống trình duyệt (ví dụ: kết quả ping thời gian thực, cảnh báo sự cố sập web, phân tích nguyên nhân sự cố AI). Việc lựa chọn giao thức truyền tin thời gian thực đóng vai trò sống còn đối với hiệu năng hệ thống, đặc biệt trong môi trường máy chủ hạn chế tài nguyên (VPS 1 vCPU, 1GB RAM).
+
+### 10.1. So sánh chi tiết kỹ thuật: SSE vs. WebSockets vs. Short Polling
+
+| Tiêu chí | Server-Sent Events (SSE) | WebSockets (WS) | Short Polling (HTTP GET định kỳ) |
+| :--- | :--- | :--- | :--- |
+| **Chiều truyền tin** | **Một chiều (Unidirectional):** Server $\rightarrow$ Client | **Hai chiều (Bidirectional):** Server $\longleftrightarrow$ Client | Giả lập (Client liên tục kéo dữ liệu) |
+| **Giao thức mạng** | Chuẩn **HTTP/1.1** hoặc **HTTP/2** thuần túy | Chuyển đổi giao thức riêng (TCP Upgrade qua `ws://` hoặc `wss://`) | HTTP/1.1 hoặc HTTP/2 tiêu chuẩn |
+| **Mức chiếm dụng RAM (VPS 1GB)** | **Cực thấp:** Tái sử dụng HTTP connection pool, không cần buffer frame nhị phân | **Cao:** Duy trì socket TCP hai chiều, thư viện ngoài (`ws`, `socket.io`) tốn RAM | **Cao đột biến:** Bão HTTP handshake gây tắc nghẽn CPU và Socket |
+| **Tự động kết nối lại** | **Tự động tích hợp sẵn:** Trình duyệt (`EventSource`) tự động retry khi mất mạng | **Phải tự code:** Phải tự quản lý timer reconnect và exponential backoff | Tự chạy theo `setInterval` |
+| **Vượt tường lửa & Nginx Proxy** | **100% thân thiện:** Đi qua Port 80/443 tiêu chuẩn, không bị chặn bởi corporate proxy | Phải cấu hình Nginx riêng (`proxy_set_header Upgrade $http_upgrade`) | Thân thiện |
+| **Ngữ cảnh sử dụng tối ưu** | **Dashboard giám sát, Live log streaming, AI Chatbot token streaming, Thông báo đẩy** | Chat 2 chiều thời gian thực (Messenger), Game online nhiều người chơi | Polling dự phòng khi các giao thức khác bị chặn |
+
+> **Quyết định kiến trúc:** Với bài toán của DevPulse (chỉ cần đẩy trạng thái ping và cảnh báo sự cố một chiều từ máy chủ xuống Dashboard), **Server-Sent Events (SSE) là sự lựa chọn số 1 về mặt kỹ thuật**, giúp tiết kiệm tài nguyên bộ nhớ tối đa và hoạt động mượt mà qua các lớp Nginx reverse proxy.
+
+---
+
+### 10.2. Giải quyết rào cản xác thực của Native Browser `EventSource`
+
+API chuẩn `window.EventSource` của trình duyệt **hoàn toàn không hỗ trợ gắn custom HTTP headers** (như `Authorization: Bearer <token>`). Do đó, middleware xác thực [`src/middlewares/authMiddleware.ts`](src/middlewares/authMiddleware.ts) phải hỗ trợ bóc tách Access Token linh hoạt từ cả Header lẫn Query Parameter:
+
+```typescript
+// Trích đoạn src/middlewares/authMiddleware.ts
+function extractToken(req: Request): string | null {
+  // 1. Kiểm tra Authorization header thông thường (Bearer <token>)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7);
+  }
+
+  // 2. Dự phòng: Kiểm tra Query Parameter (?token=...) chuyên biệt cho EventSource
+  if (req.query && typeof req.query.token === 'string') {
+    return req.query.token;
+  }
+
+  return null;
+}
+```
+
+---
+
+### 10.3. Bộ điều hướng luồng dữ liệu SSE (`src/controllers/sseController.ts`)
+
+Endpoint `GET /api/sse/monitors` thiết lập kết nối streaming liên tục với các headers đặc biệt:
+
+```typescript
+import { Request, Response } from 'express';
+import { realtimeService, SseConnectedEvent } from '../services/realtimeService.js';
+
+// Establish persistent Server-Sent Events stream for authenticated client
+export function subscribeMonitors(req: Request, res: Response): void {
+  const userId = req.user!.id;
+
+  // 1. Thiết lập các HTTP Headers bắt buộc cho chuẩn SSE W3C
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  
+  // 2. Vô hiệu hóa tính năng đệm của Nginx Reverse Proxy (Bắt buộc)
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  // 3. Giữ kết nối socket mở vô hạn, không bị timeout bởi Node.js HTTP server
+  req.socket.setKeepAlive(true);
+  req.socket.setTimeout(0);
+
+  // 4. Xả ngay headers ban đầu về trình duyệt để hoàn tất bắt tay (Handshake)
+  res.flushHeaders();
+
+  // 5. Đăng ký Response stream vào Connection Pool quản lý trên RAM
+  realtimeService.addConnection(userId, res);
+
+  // 6. Gửi sự kiện mở đầu xác nhận kết nối thành công
+  const initialPayload: SseConnectedEvent = {
+    type: 'CONNECTED',
+    userId,
+    connectedAt: new Date().toISOString(),
+  };
+  res.write(`event: CONNECTED\ndata: ${JSON.stringify(initialPayload)}\n\n`);
+
+  // 7. Lắng nghe sự kiện ngắt kết nối khi người dùng tắt tab để dọn dẹp RAM O(1)
+  req.on('close', () => {
+    realtimeService.removeConnection(userId, res);
+  });
+}
+```
+
+#### 🔄 Giải thích chi tiết các cờ kỹ thuật:
+- **`X-Accel-Buffering: no`:** Báo cho Nginx không được tích lũy dữ liệu vào bộ đệm (buffer) mà phải đẩy từng frame tức thì về trình duyệt người dùng.
+- **`res.flushHeaders()`:** Gửi ngay lập tức status code `HTTP 200 OK` và headers về client. Nếu không gọi hàm này, trình duyệt sẽ bị treo ở trạng thái Pending cho đến khi có dòng dữ liệu đầu tiên được ghi.
+- **`req.socket.setTimeout(0)`:** Vô hiệu hóa socket timeout mặc định (thường là 120s trong Node.js) để duy trì kênh truyền phát mở liên tục nhiều giờ.
+
+---
+
+### 10.4. Quản lý Bể chứa Kết nối trên RAM & Heartbeat Timer (`src/services/realtimeService.ts`)
+
+Lớp `RealtimeService` quản lý toàn bộ các client đang kết nối trên bộ nhớ RAM bằng cấu trúc dữ liệu `Map<string, Set<Response>>`:
+
+```typescript
+import { Response } from 'express';
+import { eventBus, PingCompletedEvent, IncidentAlertEvent } from '../utils/eventBus.js';
+
+export class RealtimeService {
+  // Ánh xạ userId -> Tập hợp các kết nối Response (1 user có thể mở nhiều tab trình duyệt cùng lúc)
+  private connections: Map<string, Set<Response>> = new Map();
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+  private readonly heartbeatIntervalMs = 30000; // Định kỳ 30 giây
+
+  constructor() {
+    this.registerEventBusListeners();
+    this.startHeartbeat();
+  }
+
+  // Đăng ký nhận sự kiện từ Event Bus nội bộ của hệ thống
+  private registerEventBusListeners(): void {
+    eventBus.onPingCompleted((payload: PingCompletedEvent) => {
+      this.broadcastMonitorPing(payload);
+    });
+
+    eventBus.onIncidentAlert((payload: IncidentAlertEvent) => {
+      this.broadcastIncidentAlert(payload);
+    });
+  }
+
+  // Thêm kết nối mới vào Connection Pool
+  addConnection(userId: string, res: Response): void {
+    let clientSet = this.connections.get(userId);
+    if (!clientSet) {
+      clientSet = new Set<Response>();
+      this.connections.set(userId, clientSet);
+    }
+    clientSet.add(res);
+  }
+
+  // Xóa kết nối khi client ngắt và giải phóng Set rỗng để chống rò rỉ RAM (Memory Leak)
+  removeConnection(userId: string, res: Response): void {
+    const clientSet = this.connections.get(userId);
+    if (!clientSet) return;
+
+    clientSet.delete(res);
+    if (clientSet.size === 0) {
+      this.connections.delete(userId);
+    }
+  }
+
+  // Bắn sự kiện Ping Metric tức thời xuống toàn bộ tab của User sở hữu Monitor đó
+  broadcastMonitorPing(payload: PingCompletedEvent): void {
+    const clientSet = this.connections.get(payload.userId);
+    if (!clientSet || clientSet.size === 0) return;
+
+    const eventString = `event: MONITOR_PING\ndata: ${JSON.stringify(payload)}\n\n`;
+    clientSet.forEach((res) => res.write(eventString));
+  }
+
+  // Định kỳ gửi comment heartbeat chống Nginx 504 Gateway Timeout
+  private startHeartbeat(): void {
+    this.heartbeatTimer = setInterval(() => {
+      // Chuẩn W3C SSE: Dòng bắt đầu bằng dấu hai chấm (:) là Comment, trình duyệt sẽ tự động bỏ qua
+      const heartbeatComment = ': heartbeat\n\n';
+      this.connections.forEach((clientSet) => {
+        clientSet.forEach((res) => res.write(heartbeatComment));
+      });
+    }, this.heartbeatIntervalMs);
+
+    this.heartbeatTimer.unref(); // Không chặn tiến trình Node.js thoát khi tắt server
+  }
+}
+
+export const realtimeService = new RealtimeService();
+```
+
+#### 🛡️ Cơ chế Heartbeat Comment (`: heartbeat\n\n`):
+Nginx và các Cloud Load Balancer (AWS ALB, Cloudflare) thường có cấu hình `proxy_read_timeout` mặc định là **60 giây**. Nếu trong 60 giây mà server không phát sinh sự kiện nào, Nginx sẽ tự động ngắt kết nối và trả về lỗi `HTTP 504 Gateway Timeout`.
+
+Bằng cách gửi định kỳ mỗi 30 giây một chuỗi comment `: heartbeat\n\n`, luồng socket mạng luôn phát sinh byte truyền nhận để giữ kết nối sống (Keep-Alive), trong khi trình duyệt hoàn toàn phớt lờ dòng comment này mà không kích hoạt bất kỳ handler JavaScript thừa thãi nào.
+
+---
+
+## 11. Reusable Project Bootstrap Checklist
 
 Khi bắt đầu một dự án Backend mới theo khuôn mẫu này, hãy thực hiện theo thứ tự:
 
