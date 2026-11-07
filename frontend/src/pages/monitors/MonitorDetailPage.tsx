@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -13,162 +13,36 @@ import { Badge } from '../../components/common/Badge';
 import { Stat } from '../../components/common/Stat';
 import { MonitorModal } from '../../components/monitors/MonitorModal';
 import { DeleteMonitorModal } from '../../components/monitors/DeleteMonitorModal';
-import { monitorService } from '../../services/monitorService';
-import { useToast } from '../../context/ToastContext';
-import { formatRelativeTime, formatDate } from '../../lib/date';
-import { getApiErrorMessage } from '../../lib/apiError';
-import {
-  MonitorResponseDto,
-  MonitorMetricDto,
-  UpdateMonitorPayload,
-} from '../../types/monitor';
-import { IncidentResponseDto } from '../../types/incident';
+import { useMonitorDetail } from '../../hooks/useMonitorDetail';
+import { formatRelativeTime, formatDate, formatDuration } from '../../lib/date';
+import { UpdateMonitorPayload } from '../../types/monitor';
 
 // Detailed monitor telemetry dashboard displaying live latency, SSL health, recent checks, and incident logs
 export const MonitorDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { showToast } = useToast();
-
-  const [monitor, setMonitor] = useState<MonitorResponseDto | null>(null);
-  const [metrics, setMetrics] = useState<MonitorMetricDto[]>([]);
-  const [incidents, setIncidents] = useState<IncidentResponseDto[]>([]);
-  const [range, setRange] = useState<'1h' | '24h' | '7d'>('1h');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isChecking, setIsChecking] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const loadData = useCallback(async () => {
-    if (!id) return;
-    try {
-      const [monitorData, incidentsData] = await Promise.all([
-        monitorService.getMonitorById(id),
-        monitorService.getMonitorIncidents(id),
-      ]);
-      setMonitor(monitorData);
-      setIncidents(incidentsData);
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Failed to load monitor');
-      navigate('/monitors');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [id, navigate, showToast]);
-
-  const loadMetrics = useCallback(async () => {
-    if (!id) return;
-    try {
-      const metricsData = await monitorService.getMetrics(id, { range, limit: 30 });
-      setMetrics(metricsData);
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Failed to load metrics');
-    }
-  }, [id, range, showToast]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  useEffect(() => {
-    loadMetrics();
-  }, [loadMetrics]);
-
-  const chartData = useMemo(() => {
-    if (metrics.length === 0) {
-      return {
-        points: '0,50 100,50',
-        latestLatency: 'Pending',
-        uptimePercentage: monitor?.status === 'up' ? '100%' : '0%',
-      };
-    }
-
-    const sortedMetrics = [...metrics].reverse();
-    const latencies = sortedMetrics.map((m) => m.latency);
-    const maxLatency = Math.max(...latencies, 100);
-    const minLatency = 0;
-
-    const points = sortedMetrics
-      .map((item, index) => {
-        const x = (index / Math.max(1, sortedMetrics.length - 1)) * 100;
-        const normalized = (item.latency - minLatency) / (maxLatency - minLatency);
-        const y = 90 - normalized * 70;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(' ');
-
-    const upCount = sortedMetrics.filter((m) => m.isUp).length;
-    const uptimePercentage = `${((upCount / sortedMetrics.length) * 100).toFixed(1)}%`;
-    const latestLatency = `${sortedMetrics[sortedMetrics.length - 1].latency} ms`;
-
-    return {
-      points,
-      latestLatency,
-      uptimePercentage,
-    };
-  }, [metrics, monitor?.status]);
-
-  const handleInstantPing = async () => {
-    if (!monitor) return;
-    setIsChecking(true);
-    showToast(`An instant check was queued for ${monitor.name}.`, 'info', 'Ping requested');
-
-    try {
-      const result = await monitorService.triggerInstantPing(monitor.id);
-      showToast(
-        `${monitor.name} responded successfully with status ${result.statusCode} in ${result.latency} ms.`,
-        result.isUp ? 'success' : 'error',
-        'Check completed'
-      );
-      loadMetrics();
-      const updated = await monitorService.getMonitorById(monitor.id);
-      setMonitor(updated);
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Instant check failed');
-    } finally {
-      setIsChecking(false);
-    }
-  };
-
-  const handleToggle = async () => {
-    if (!monitor) return;
-    try {
-      const updated = await monitorService.toggleMonitor(monitor.id);
-      setMonitor(updated);
-      showToast(
-        updated.status === 'paused'
-          ? `${monitor.name} has been paused.`
-          : `${monitor.name} resumed and is waiting for its first check.`,
-        updated.status === 'paused' ? 'warning' : 'info',
-        updated.status === 'paused' ? 'Monitor paused' : 'Monitor resumed'
-      );
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Failed to toggle monitor');
-    }
-  };
+  const {
+    monitor,
+    metrics,
+    incidents,
+    range,
+    isLoading,
+    isChecking,
+    cooldown,
+    chartData,
+    setRange,
+    instantPing,
+    toggleMonitor,
+    updateMonitor,
+    deleteMonitor,
+  } = useMonitorDetail(id);
 
   const handleUpdate = async (payload: UpdateMonitorPayload) => {
-    if (!monitor) return;
-    try {
-      const updated = await monitorService.updateMonitor(monitor.id, payload);
-      setMonitor(updated);
-      showToast(`${monitor.name} configuration was saved.`, 'success', 'Monitor updated');
-      setEditing(false);
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Failed to update monitor');
-      throw err;
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!monitor) return;
-    try {
-      await monitorService.deleteMonitor(monitor.id);
-      showToast(`${monitor.name} was permanently removed.`, 'error', 'Monitor deleted');
-      navigate('/monitors');
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Failed to delete monitor');
-    }
+    await updateMonitor(payload);
+    setEditing(false);
   };
 
   if (isLoading || !monitor) {
@@ -186,7 +60,7 @@ export const MonitorDetailPage: React.FC = () => {
       <button
         type="button"
         onClick={() => navigate('/monitors')}
-        className="flex items-center gap-1.5 text-xs font-black underline decoration-2 underline-offset-4 transition-transform hover:-translate-x-0.5"
+        className="flex items-center gap-1 text-xs font-black underline decoration-2 underline-offset-4"
       >
         <ArrowLeft className="size-3.5" /> Back to monitors
       </button>
@@ -212,43 +86,47 @@ export const MonitorDetailPage: React.FC = () => {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={handleInstantPing}
-            disabled={isChecking || monitor.status === 'paused'}
-            className="flex items-center gap-2 rounded-md border-2 border-zinc-950 bg-yellow-200 px-4 py-2.5 text-xs font-black text-zinc-950 shadow-[3px_3px_0_#18181b] transition-transform hover:-translate-y-0.5 disabled:opacity-45 dark:border-[#737c91] dark:bg-[#665c2f] dark:text-[#fff8df]"
+            onClick={instantPing}
+            disabled={isChecking || cooldown > 0 || monitor.status === 'paused'}
+            className="flex items-center gap-2 rounded-md border-2 border-zinc-950 bg-yellow-200 px-4 py-2.5 text-xs font-black text-zinc-950 shadow-[3px_3px_0_#18181b] disabled:opacity-45 dark:border-[#737c91] dark:bg-[#665c2f] dark:text-[#fff8df]"
           >
             <Activity className="size-4" />
-            {isChecking ? 'Checking...' : 'Check now'}
+            {isChecking ? 'Checking...' : cooldown > 0 ? `${cooldown}s` : 'Check now'}
           </button>
           <button
             type="button"
-            onClick={handleToggle}
-            className="flex items-center gap-2 rounded-md border-2 border-zinc-950 bg-retro-blue px-4 py-2.5 text-xs font-black text-zinc-950 shadow-[3px_3px_0_#18181b] transition-transform hover:-translate-y-0.5 dark:border-[#737c91] dark:bg-[#394b67] dark:text-slate-100"
+            onClick={toggleMonitor}
+            className="flex items-center gap-2 rounded-md border-2 border-zinc-950 bg-retro-blue px-4 py-2.5 text-xs font-black text-zinc-950 dark:border-[#737c91] dark:bg-[#394b67] dark:text-slate-100"
           >
             {monitor.status === 'paused' ? (
-              <Play className="size-4 fill-current" />
+              <>
+                <Play className="size-4 fill-current" /> Resume
+              </>
             ) : (
-              <Pause className="size-4 fill-current" />
+              <>
+                <Pause className="size-4 fill-current" /> Pause
+              </>
             )}
-            {monitor.status === 'paused' ? 'Resume' : 'Pause'}
           </button>
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="flex items-center gap-2 rounded-md border-2 border-zinc-950 bg-white px-4 py-2.5 text-xs font-black text-zinc-950 shadow-[3px_3px_0_#18181b] transition-transform hover:-translate-y-0.5 dark:border-[#737c91] dark:bg-retro-panel dark:text-[#f3eadc]"
+            className="flex items-center gap-2 rounded-md border-2 border-zinc-950 bg-white px-4 py-2.5 text-xs font-black dark:border-[#737c91] dark:bg-retro-panel"
           >
             <Edit3 className="size-4" /> Edit
           </button>
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className="grid size-10 place-items-center rounded-md border-2 border-red-800 bg-coral-soft text-red-950 transition-transform hover:-translate-y-0.5 dark:border-red-400 dark:bg-red-950 dark:text-red-200"
             aria-label="Delete monitor"
+            className="grid size-10 place-items-center rounded-md border-2 border-red-800 bg-coral-soft text-red-950 dark:border-red-400 dark:bg-red-950 dark:text-red-200"
           >
             <Trash2 className="size-4" />
           </button>
         </div>
       </div>
 
+      {/* 3 Metric Stat cards */}
       <div className="mt-8 grid gap-4 sm:grid-cols-3">
         <Stat
           label="Last checked"
@@ -259,17 +137,18 @@ export const MonitorDetailPage: React.FC = () => {
         <Stat
           label="Latest latency"
           value={chartData.latestLatency}
-          note="Most recent check"
+          note="Most recent successful ping"
           color="bg-retro-blue dark:bg-[#394b67]"
         />
         <Stat
-          label="24h Availability"
+          label="Uptime 24h"
           value={chartData.uptimePercentage}
           note="Rolling availability"
           color="bg-retro-lilac dark:bg-[#64557a]"
         />
       </div>
 
+      {/* Side-by-side Live latency and SSL certificate */}
       <div className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_.7fr]">
         <section className="rounded-lg border-2 border-zinc-950 bg-white p-5 dark:border-[#737c91] dark:bg-retro-panel">
           <div className="flex items-start justify-between gap-4">
@@ -285,18 +164,16 @@ export const MonitorDetailPage: React.FC = () => {
                   type="button"
                   key={value}
                   onClick={() => setRange(value)}
-                  className={`rounded-md px-3 py-1.5 text-[10px] font-black uppercase transition-colors ${
-                    range === value
-                      ? 'bg-yellow-300 text-zinc-950'
-                      : 'text-zinc-500 dark:text-slate-400'
-                  }`}
+                  className={`rounded-md px-3 py-1.5 text-[10px] font-black uppercase ${range === value
+                    ? 'bg-yellow-300 text-zinc-950'
+                    : 'text-zinc-500 dark:text-slate-400'
+                    }`}
                 >
                   {value}
                 </button>
               ))}
             </div>
           </div>
-
           <svg
             className="mt-6 h-56 w-full overflow-visible"
             viewBox="0 0 100 100"
@@ -339,6 +216,7 @@ export const MonitorDetailPage: React.FC = () => {
           </div>
         </section>
 
+        {/* SSL certificate card */}
         <section className="rounded-lg border-2 border-zinc-950 bg-[#d7dda7] p-5 text-zinc-950 dark:border-[#718d84] dark:bg-[#304b45] dark:text-[#f3eadc]">
           <div className="flex items-start justify-between">
             <div>
@@ -349,7 +227,6 @@ export const MonitorDetailPage: React.FC = () => {
             </div>
             <Shield className="size-5" />
           </div>
-
           {!monitor.sslInfo ? (
             <div className="mt-8 rounded-md border-2 border-dashed border-zinc-700 p-5 text-center">
               <div className="font-black">
@@ -382,16 +259,12 @@ export const MonitorDetailPage: React.FC = () => {
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-zinc-950/20">
                   <div
-                    style={{
-                      width: `${Math.min(100, Math.max(5, (monitor.sslInfo.daysRemaining / 90) * 100))}%`,
-                    }}
-                    className={`h-full rounded-full ${
-                      monitor.sslInfo.daysRemaining < 7
-                        ? 'bg-red-600'
-                        : monitor.sslInfo.daysRemaining < 30
-                          ? 'bg-amber-600'
-                          : 'bg-emerald-700'
-                    }`}
+                    className={`h-full rounded-full ${monitor.sslInfo.daysRemaining < 7
+                      ? 'w-[8%] bg-red-600'
+                      : monitor.sslInfo.daysRemaining < 30
+                        ? 'w-[32%] bg-amber-600'
+                        : 'w-[72%] bg-emerald-700'
+                      }`}
                   />
                 </div>
               </div>
@@ -400,6 +273,7 @@ export const MonitorDetailPage: React.FC = () => {
         </section>
       </div>
 
+      {/* Recent pings table */}
       <section className="mt-6 overflow-hidden rounded-lg border-2 border-zinc-950 bg-white dark:border-[#737c91] dark:bg-retro-panel">
         <div className="border-b-2 border-zinc-950 p-5 dark:border-[#737c91]">
           <h2 className="font-black">Recent pings</h2>
@@ -419,7 +293,22 @@ export const MonitorDetailPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-slate-700">
-              {metrics.length === 0 ? (
+              {isChecking && (
+                <tr className="animate-pulse bg-yellow-50/70 dark:bg-yellow-950/20">
+                  <td className="p-4 font-mono text-xs font-bold text-yellow-700 dark:text-yellow-300">
+                    Just now
+                  </td>
+                  <td className="p-4">
+                    <Badge status="pending" />
+                  </td>
+                  <td className="p-4 font-mono text-sm font-black text-zinc-400">—</td>
+                  <td className="p-4 font-mono text-sm text-zinc-400">In flight...</td>
+                  <td className="p-4 text-xs font-medium text-yellow-700 dark:text-yellow-400">
+                    Probe request in flight...
+                  </td>
+                </tr>
+              )}
+              {metrics.length === 0 && !isChecking ? (
                 <tr>
                   <td colSpan={5} className="p-8 text-center text-sm font-bold text-zinc-500 dark:text-slate-400">
                     No recent checks recorded for this endpoint yet.
@@ -445,10 +334,11 @@ export const MonitorDetailPage: React.FC = () => {
         </div>
       </section>
 
+      {/* Incident history grid */}
       <section className="mt-6">
         <h2 className="text-xl font-black">Incident history</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {incidents.length > 0 ? (
+          {incidents.length ? (
             incidents.map((item) => (
               <article
                 key={item.id}
@@ -456,13 +346,13 @@ export const MonitorDetailPage: React.FC = () => {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="font-black">
-                    HTTP {item.errorDetails?.statusCode ?? 500} interruption
+                    HTTP {item.errorDetails.statusCode} interruption
                   </div>
                   <Badge status={item.status} />
                 </div>
                 <div className="mt-4 flex justify-between text-xs text-zinc-600 dark:text-slate-300">
-                  <span>{formatDate(item.startedAt)}</span>
-                  <span>{item.resolvedAt ? `Resolved at ${formatDate(item.resolvedAt)}` : 'Ongoing outage'}</span>
+                  <span>{formatRelativeTime(item.startedAt)}</span>
+                  <span>{formatDuration(item.startedAt, item.resolvedAt)}</span>
                 </div>
               </article>
             ))
@@ -474,6 +364,7 @@ export const MonitorDetailPage: React.FC = () => {
         </div>
       </section>
 
+      {/* Editing Dialog Modal */}
       {editing && (
         <MonitorModal
           monitor={monitor}
@@ -482,11 +373,12 @@ export const MonitorDetailPage: React.FC = () => {
         />
       )}
 
+      {/* Permanent Deletion Dialog Modal */}
       {confirmDelete && (
         <DeleteMonitorModal
           monitor={monitor}
           onClose={() => setConfirmDelete(false)}
-          onConfirm={handleDelete}
+          onConfirm={deleteMonitor}
         />
       )}
     </div>

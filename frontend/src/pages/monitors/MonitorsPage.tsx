@@ -4,10 +4,8 @@ import { Plus, Clock, Shield, Play, Pause, Edit3, Trash2, Activity, ArrowLeft, A
 import { Badge } from '../../components/common/Badge';
 import { MonitorModal } from '../../components/monitors/MonitorModal';
 import { DeleteMonitorModal } from '../../components/monitors/DeleteMonitorModal';
-import { monitorService } from '../../services/monitorService';
-import { useToast } from '../../context/ToastContext';
+import { useMonitors } from '../../hooks/useMonitors';
 import { formatRelativeTime } from '../../lib/date';
-import { getApiErrorMessage } from '../../lib/apiError';
 import {
   MonitorResponseDto,
   CreateMonitorPayload,
@@ -17,13 +15,19 @@ import {
 // Central monitor targets dashboard displaying live endpoints, SSL health, and quick actions
 export const MonitorsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { showToast } = useToast();
+  const {
+    monitors,
+    isLoading,
+    cooldowns,
+    createMonitor,
+    updateMonitor,
+    toggleMonitor,
+    deleteMonitor,
+    instantPing,
+  } = useMonitors();
 
-  const [monitors, setMonitors] = useState<MonitorResponseDto[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [editing, setEditing] = useState<MonitorResponseDto | null | 'new'>(null);
   const [deleting, setDeleting] = useState<MonitorResponseDto | null>(null);
-  const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
   const [monitorPage, setMonitorPage] = useState(1);
 
   const monitorsPerPage = 8;
@@ -38,128 +42,26 @@ export const MonitorsPage: React.FC = () => {
   const pausedCount = monitors.filter((m) => m.status === 'paused').length;
   const pendingCount = monitors.filter((m) => m.status === 'pending').length;
 
-  useEffect(() => {
-    let isMounted = true;
-    async function loadMonitors() {
-      try {
-        const data = await monitorService.getMonitors();
-        if (isMounted) {
-          setMonitors(data);
-        }
-      } catch (err) {
-        if (isMounted) {
-          showToast(getApiErrorMessage(err), 'error', 'Failed to load monitors');
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    }
-
-    loadMonitors();
-    return () => {
-      isMounted = false;
-    };
-  }, [showToast]);
-
+  // Re-align pagination index if the monitor list shrinks below the current page offset
   useEffect(() => {
     if (monitorPage > monitorPageCount) {
       setMonitorPage(monitorPageCount);
     }
   }, [monitorPage, monitorPageCount]);
 
-  useEffect(() => {
-    const hasActiveCooldown = Object.values(cooldowns).some((cd) => cd > 0);
-    if (!hasActiveCooldown) return;
-
-    const timer = setInterval(() => {
-      setCooldowns((prev) => {
-        const next: Record<string, number> = {};
-        for (const [id, count] of Object.entries(prev)) {
-          if (count > 1) {
-            next[id] = count - 1;
-          }
-        }
-        return next;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [cooldowns]);
-
   const handleSave = async (payload: CreateMonitorPayload | UpdateMonitorPayload) => {
-    try {
-      if (editing === 'new') {
-        const created = await monitorService.createMonitor(payload as CreateMonitorPayload);
-        setMonitors((prev) => [created, ...prev]);
-        showToast(
-          'The monitor was created and is waiting for its first check.',
-          'success',
-          'Monitor created'
-        );
-      } else if (editing) {
-        const updated = await monitorService.updateMonitor(editing.id, payload as UpdateMonitorPayload);
-        setMonitors((prev) =>
-          prev.map((m) => (m.id === editing.id ? updated : m))
-        );
-        showToast(
-          `${editing.name} configuration was saved.`,
-          'success',
-          'Monitor updated'
-        );
-      }
-      setEditing(null);
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Action failed');
-      throw err;
+    if (editing === 'new') {
+      await createMonitor(payload as CreateMonitorPayload);
+    } else if (editing) {
+      await updateMonitor(editing.id, payload as UpdateMonitorPayload);
     }
-  };
-
-  const handleToggle = async (monitor: MonitorResponseDto) => {
-    try {
-      const updated = await monitorService.toggleMonitor(monitor.id);
-      setMonitors((prev) =>
-        prev.map((m) => (m.id === monitor.id ? updated : m))
-      );
-      showToast(
-        updated.status === 'paused'
-          ? `${monitor.name} has been paused.`
-          : `${monitor.name} resumed and is waiting for its first check.`,
-        updated.status === 'paused' ? 'warning' : 'info',
-        updated.status === 'paused' ? 'Monitor paused' : 'Monitor resumed'
-      );
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Failed to toggle monitor');
-    }
-  };
-
-  const handleInstantPing = async (monitor: MonitorResponseDto) => {
-    setCooldowns((prev) => ({ ...prev, [monitor.id]: 15 }));
-    showToast(`An instant check was queued for ${monitor.name}.`, 'info', 'Ping requested');
-
-    try {
-      const result = await monitorService.triggerInstantPing(monitor.id);
-      showToast(
-        `${monitor.name} check completed with HTTP ${result.statusCode} (${result.latency} ms).`,
-        result.isUp ? 'success' : 'error',
-        'Ping response'
-      );
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Instant ping failed');
-    }
+    setEditing(null);
   };
 
   const handleDelete = async () => {
     if (!deleting) return;
-    try {
-      await monitorService.deleteMonitor(deleting.id);
-      setMonitors((prev) => prev.filter((m) => m.id !== deleting.id));
-      showToast(`${deleting.name} was permanently removed.`, 'error', 'Monitor deleted');
-      setDeleting(null);
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Failed to delete monitor');
-    }
+    await deleteMonitor(deleting.id, deleting.name);
+    setDeleting(null);
   };
 
   return (
@@ -262,7 +164,7 @@ export const MonitorsPage: React.FC = () => {
                         <button
                           type="button"
                           disabled={cooldown > 0 || m.status === 'paused'}
-                          onClick={() => handleInstantPing(m)}
+                          onClick={() => instantPing(m)}
                           title="Ping now"
                           className="rounded-md border border-zinc-950 bg-yellow-200 p-2 transition-transform hover:-translate-y-0.5 disabled:opacity-40 dark:border-[#737c91] dark:bg-slate-900 dark:text-slate-400"
                         >
@@ -276,7 +178,7 @@ export const MonitorsPage: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleToggle(m)}
+                          onClick={() => toggleMonitor(m)}
                           title={m.status === 'paused' ? 'Resume monitor' : 'Pause monitor'}
                           aria-label={m.status === 'paused' ? 'Resume monitor' : 'Pause monitor'}
                           className={`rounded-md border p-2 transition-transform hover:-translate-y-0.5 ${

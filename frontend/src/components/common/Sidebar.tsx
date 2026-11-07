@@ -15,7 +15,7 @@ import {
 import { Logo } from './Logo';
 import { useAuthStore } from '../../stores/authStore';
 import { authService } from '../../services/authService';
-import { useToast } from '../../context/ToastContext';
+import { toast } from '../../stores/toastStore';
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -25,7 +25,6 @@ interface SidebarProps {
 // Enterprise retro sidebar navigation with user account management and public link copy matching Figma
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => {
   const { user, clearAuth } = useAuthStore();
-  const { showToast } = useToast();
   const navigate = useNavigate();
   const [linkCopied, setLinkCopied] = useState(false);
 
@@ -51,10 +50,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
       const publicUrl = `${window.location.origin}/status/${statusSlug}`;
       await navigator.clipboard.writeText(publicUrl);
       setLinkCopied(true);
-      showToast(`/status/${statusSlug} copied to clipboard.`, 'success', 'Public link copied');
+      toast.success(`/status/${statusSlug} copied to clipboard.`, 'Public link copied');
       window.setTimeout(() => setLinkCopied(false), 1800);
     } catch {
-      showToast('Clipboard access was blocked by the browser.', 'error', 'Copy failed');
+      toast.error('Clipboard access was blocked by the browser.', 'Copy failed');
     }
   };
 
@@ -65,7 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
       // Clear local session even if server request fails
     } finally {
       clearAuth();
-      showToast('Your local session has been closed.', 'info', 'Signed out');
+      toast.info('Your local session has been closed.', 'Signed out');
       navigate('/auth');
     }
   };

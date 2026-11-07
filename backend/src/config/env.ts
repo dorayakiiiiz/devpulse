@@ -20,11 +20,11 @@ const envSchema = z.object({
   SMTP_FROM: z.string().optional().default('DevPulse Alerts <alerts@devpulse.local>'),
   AI_PROVIDER: z.enum(['groq', 'gemini']).default('groq'),
   GROQ_API_KEY: z.string().optional(),
-  GROQ_MODEL: z.string().default('llama-3.3-70b-versatile'),
+  GROQ_MODEL: z.string().default('openai/gpt-oss-120b'),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-1.5-flash'),
   LLM_API_KEY: z.string().optional(),
-  LLM_MODEL: z.string().optional().default('llama-3.3-70b-versatile'),
+  LLM_MODEL: z.string().optional().default('openai/gpt-oss-120b'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

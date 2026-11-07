@@ -4,6 +4,7 @@ import { Menu, Plus } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { useAuthStore } from '../../stores/authStore';
+import { useRealtimeStore } from '../../stores/realtimeStore';
 
 interface HeaderProps {
   onOpenMobileMenu?: () => void;
@@ -23,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const isConnected = useRealtimeStore((state) => state.isConnected);
 
   const title = getHeaderTitle(location.pathname);
   const workspaceName = user?.name || 'Workspace';
@@ -52,8 +54,12 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
 
       <div className="flex items-center gap-3">
         <div className="hidden items-center gap-2 rounded-md border border-zinc-950 bg-white px-3 py-2 text-xs font-bold dark:border-[#737c91] dark:bg-retro-panel sm:flex">
-          <span className="size-2 rounded-full bg-emerald-500" />
-          <span>Live stream connected</span>
+          <span
+            className={`size-2 rounded-full ${
+              isConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'
+            }`}
+          />
+          <span>{isConnected ? 'Live stream connected' : 'Connecting stream...'}</span>
         </div>
 
         <ThemeToggle />

@@ -28,7 +28,11 @@ export class GroqProvider implements IAiProvider {
 
     try {
       const systemPrompt =
-        'You are an expert Site Reliability Engineer (SRE). Analyze the incident failure data and produce a concise technical post-mortem report in strictly valid JSON format with three fields: summary (string, 1-2 sentences), rootCause (string, technical diagnosis), and actionItems (array of 2-4 concrete remediation steps). Do not include markdown code fences or conversational text outside the JSON object.';
+        'You are an expert Site Reliability Engineer (SRE). Analyze the incident failure data and produce a concise technical post-mortem report in strictly valid JSON format with three fields: ' +
+        'summary (string, 1 brief sentence under 15 words), ' +
+        'rootCause (string, 1 concise technical diagnosis sentence under 20 words), and ' +
+        'actionItems (array of exactly 3 short, punchy remediation steps, each under 6 words, e.g. "Raise pool ceiling to 50", "Add saturation alert", "Review retry policy"). ' +
+        'Do not include markdown code fences or conversational text outside the JSON object.';
 
       const userContent = JSON.stringify({
         targetUrl: payload.targetUrl,
@@ -59,7 +63,8 @@ export class GroqProvider implements IAiProvider {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.warn(`[Groq Provider] API responded with HTTP status ${response.status}`);
+        const errorText = await response.text();
+        console.warn(`[Groq Provider] API responded with HTTP status ${response.status}: ${errorText}`);
         return null;
       }
 

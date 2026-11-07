@@ -31,7 +31,11 @@ export class GeminiProvider implements IAiProvider {
 
     try {
       const promptInstruction =
-        'You are an expert Site Reliability Engineer (SRE). Analyze the following incident failure data and produce a concise technical post-mortem report in strictly valid JSON format with three fields: summary (string, 1-2 sentences), rootCause (string, technical diagnosis), and actionItems (array of 2-4 concrete remediation steps). Do not include markdown code fences or conversational text outside the JSON object.\n\nIncident Failure Data:\n';
+        'You are an expert Site Reliability Engineer (SRE). Analyze the following incident failure data and produce a concise technical post-mortem report in strictly valid JSON format with three fields: ' +
+        'summary (string, 1 brief sentence under 15 words), ' +
+        'rootCause (string, 1 concise technical diagnosis sentence under 20 words), and ' +
+        'actionItems (array of exactly 3 short, punchy remediation steps, each under 6 words, e.g. "Raise pool ceiling to 50", "Add saturation alert", "Review retry policy"). ' +
+        'Do not include markdown code fences or conversational text outside the JSON object.\n\nIncident Failure Data:\n';
 
       const userContent = JSON.stringify({
         targetUrl: payload.targetUrl,

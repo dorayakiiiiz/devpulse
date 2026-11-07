@@ -5,7 +5,7 @@
 
 Tài liệu chuẩn hóa kiến trúc Frontend React / TypeScript theo mô hình **Modular Component-Service Architecture**, đóng vai trò là khuôn mẫu chuẩn (*Standard Template*) cho toàn bộ mã nguồn Frontend dự án DevPulse cũng như tái sử dụng cho các dự án web hiện đại.
 
-Tài liệu này phân tích chi tiết từ triết lý kiến trúc, cấu trúc thư mục, vòng đời session, tầng API Client Interceptor, quản lý State với Zustand, hệ thống Router & Route Guards, Toast Context, cơ chế Realtime SSE Client, Custom Hooks, Data Visualization, cho đến hệ thống Design System Retro Neo-Brutalism.
+Tài liệu này phân tích chi tiết từ triết lý kiến trúc, cấu trúc thư mục, vòng đời session, tầng API Client Interceptor, quản lý State với Zustand, hệ thống Router & Route Guards, Toast Notification System, cơ chế Realtime SSE Client, Custom Hooks, Data Visualization, cho đến hệ thống Design System Retro Neo-Brutalism.
 
 ---
 
@@ -22,7 +22,7 @@ Kiến trúc tuân thủ nguyên tắc phân tách trách nhiệm (*Separation o
           ├──► [Domain Widgets & Atomic Primitives] (Presentational rendering, Tailwind styling)
           │
           ▼
-[Custom Hooks & Global Stores]   (useMonitors, useRealtimeStream, authStore, themeStore)
+[Custom Hooks & Global Stores]   (useMonitors, useIncidents, authStore, themeStore, realtimeStore)
           │
           ▼
 [Typed API Services Layer]       (authService, monitorService, incidentService...)
@@ -64,11 +64,10 @@ frontend/
 ├── src/
 │   ├── components/          # Các UI components tái sử dụng
 │   │   ├── auth/            # Components chuyên biệt cho luồng Auth (OtpInput, AuthDecorations)
-│   │   ├── common/          # Atomic primitives & shared layout pieces (Header, Sidebar, Badge, Logo, ThemeToggle)
+│   │   ├── common/          # Atomic primitives & shared layout pieces (Header, Sidebar, Badge, Logo, ThemeToggle, ToastContainer)
 │   │   └── monitors/        # Widgets chuyên biệt cho Monitor (MonitorCard, LatencyChart, UptimeBar)
 │   ├── config/              # Hằng số môi trường & cấu hình API endpoint (constants.ts)
-│   ├── context/             # React Contexts toàn cục (ToastContext thông báo Neo-Brutalism)
-│   ├── hooks/               # Custom hooks tái sử dụng (useRealtimeStream, useMonitors, useDebounce)
+│   ├── hooks/               # Custom hooks tái sử dụng (useMonitors, useIncidents, useDebounce)
 │   ├── layouts/             # Khung bố cục trang (DashboardLayout)
 │   ├── lib/                 # Tiện ích thuần túy không state (utils.ts - cn, apiError.ts - chuẩn hóa lỗi)
 │   ├── pages/               # Các trang màn hình tương ứng với từng đường dẫn route
@@ -81,9 +80,9 @@ frontend/
 │   │   └── status/          # Trang trạng thái công khai (/status/:slug)
 │   ├── routes/              # Cấu hình định tuyến và route guards (AppRoutes, ProtectedRoute, PublicRoute)
 │   ├── services/            # Tầng giao tiếp API đã định kiểu (api.ts, authService, monitorService...)
-│   ├── stores/              # Quản lý state toàn cục qua Zustand (authStore, themeStore)
+│   ├── stores/              # Quản lý state toàn cục qua Zustand (authStore, themeStore, toastStore, realtimeStore)
 │   ├── types/               # Toàn bộ TypeScript interfaces & DTOs khớp 100% Backend contract
-│   ├── App.tsx              # Component gốc: Session Hydration, ToastProvider, Router
+│   ├── App.tsx              # Component gốc: Session Hydration, ToastContainer, Router
 │   ├── main.tsx             # Entry point React DOM mount
 │   └── index.css            # Tailwind directives, font-family, custom scrollbars, animations
 ├── public/                  # Static assets công khai (favicon.svg)
@@ -102,8 +101,7 @@ frontend/
 | **`lib/`** | Tiện ích thuần túy không chứa state: ghép class Tailwind `cn()`, chuẩn hóa lỗi `getApiErrorMessage()`. | Các hàm pure functions, không phụ thuộc vào React lifecycles. |
 | **`types/`** | Định nghĩa 100% dữ liệu: request payloads, response DTOs, domain enums/unions. Khớp chính xác với Backend. | Không dùng `any`. Mỗi domain có file types riêng (`auth.ts`, `monitor.ts`, `incident.ts`...). |
 | **`services/`** | Đóng gói API calls qua Axios. Mỗi service ứng với một domain (`authService`, `monitorService`...). | Trả về trực tiếp `data: T` từ `ApiSuccessResponse<T>`, không trả raw Axios response. |
-| **`stores/`** | State toàn cục nhẹ bằng Zustand: lưu Access Token, User Profile, Theme (Dark/Light). | Chỉ lưu shared global state cần truy cập đa màn hình hoặc ngoài React lifecycle. |
-| **`context/`** | Các context hệ thống cần cơ chế broadcast hoặc imperative API (ví dụ: `toast.show()`). | Không dùng context cho app state nặng gây re-render diện rộng. |
+| **`stores/`** | State toàn cục nhẹ bằng Zustand: Access Token, User Profile, Theme, Toasts, Realtime SSE socket. | Chỉ lưu shared global state cần truy cập đa màn hình hoặc ngoài React lifecycle. |
 | **`hooks/`** | Custom hooks tái sử dụng logic (fetch data, realtime SSE, debounce, media queries). | Bắt đầu bằng tiền tố `use`, quản lý lifecycle và cleanup an toàn. |
 | **`components/`** | UI components phân theo tính tái sử dụng: `common/` cho primitives dùng chung; domain folders cho widgets chuyên biệt. | Tách nhỏ components, tuân thủ nguyên tắc Single Responsibility. |
 | **`layouts/`** | Cấu trúc khung giao diện chung (Desktop Sidebar + Mobile bottom nav + Sticky Header + Main Outlet). | Chứa `<Outlet />` cho các trang con kế thừa. |
@@ -130,13 +128,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 );
 ```
 
-### 3.2. `src/App.tsx` (Session Hydration, ToastProvider, Router)
+### 3.2. `src/App.tsx` (Session Hydration, ToastContainer, Router)
 Component đóng vai trò là "trái tim" khởi động ứng dụng, thực thi quy trình **Session Hydration** ngay khi người dùng mở hoặc F5 lại trang:
 
 ```tsx
 import React, { useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
-import { ToastProvider } from './context/ToastContext';
+import { ToastContainer } from './components/common/ToastContainer';
 import { AppRoutes } from './routes/AppRoutes';
 import { useAuthStore } from './stores/authStore';
 import { authService } from './services/authService';
@@ -167,9 +165,8 @@ export const App: React.FC = () => {
 
   return (
     <BrowserRouter>
-      <ToastProvider>
-        <AppRoutes />
-      </ToastProvider>
+      <AppRoutes />
+      <ToastContainer />
     </BrowserRouter>
   );
 };
@@ -350,7 +347,7 @@ export const PublicRoute: React.FC = () => {
     );
   }
 
-  if (isAuthenticated) {
+  if (!isAuthenticated) {
     return <Navigate to="/" replace />;
   }
 
@@ -777,7 +774,7 @@ export const monitorService = {
 };
 ```
 
-### 6.3. Chuẩn hóa Bóc tách Lỗi (`src/lib/apiError.ts`)
+### 6.5. Chuẩn hóa Bóc tách Lỗi (`src/lib/apiError.ts`)
 ```typescript
 import { AxiosError } from 'axios';
 import { ApiErrorResponse } from '../types/api';
@@ -805,15 +802,16 @@ export function getApiErrorMessage(err: unknown): string {
 
 ---
 
-## 7. Toast Notification System & Global Event Bus (`context/`)
+## 7. Toast Notification System with Zustand (`stores/toastStore.ts` & `components/common/ToastContainer.tsx`)
 
-Hệ thống Toast được thiết kế theo mô hình **Hybrid Event Bus**:
-- Có thể gọi theo dạng Hook trong React: `const { showToast } = useToast()`.
-- Có thể gọi theo dạng mệnh lệnh (Imperative) từ **bất kỳ đâu** ngoài React (Axios Interceptors, Service functions, SSE listeners): `toast.success('Done')` hoặc `toast.error('Failed')`.
+Hệ thống Toast Notification được chuyển giao toàn diện sang Zustand Store (`stores/toastStore.ts`) kết hợp UI Viewport độc lập (`ToastContainer.tsx`) thay vì dùng React Context truyền thống:
+- **Zero Re-Render Cascading:** Chỉ duy nhất component `<ToastContainer />` re-render khi danh sách toasts thay đổi (thêm mới hoặc hết hạn sau 3.2s). Toàn bộ cây component còn lại trong ứng dụng không hề bị re-render.
+- **Truy cập ngoài React Lifecycle tự nhiên:** Gọi hàm điều phối mệnh lệnh `toast.success('Done')`, `toast.error('Failed')`, `toast.info('Info')`, `toast.warning('Warning')` trực tiếp từ mọi nơi (Axios Interceptors, SSE Listeners, custom hooks, event handlers) mà không cần hook wrapper hay dependency array.
+- **Thống nhất 1 cơ chế duy nhất (No Compromises / No Shims):** Loại bỏ hoàn toàn adapter hook `useToast()` cũ để đảm bảo tính đồng nhất tuyệt đối trong toàn bộ codebase, tuân thủ nghiêm ngặt quy tắc kiến trúc và sạch mã nguồn.
 
-### `src/context/ToastContext.tsx`:
-```tsx
-import React, { createContext, useContext, useEffect, useState } from 'react';
+### 7.1. Cấu trúc Store Quản trị Toasts (`src/stores/toastStore.ts`):
+```typescript
+import { create } from 'zustand';
 
 export type ToastType = 'success' | 'info' | 'warning' | 'error';
 
@@ -824,9 +822,6 @@ export interface ToastItem {
   message: string;
 }
 
-type ToastListener = (toast: ToastItem) => void;
-const listeners = new Set<ToastListener>();
-
 const toastTitles: Record<ToastType, string> = {
   success: 'Done',
   info: 'Updated',
@@ -834,16 +829,47 @@ const toastTitles: Record<ToastType, string> = {
   error: 'Couldn’t complete',
 };
 
-// Standalone imperative toast dispatcher callable from ANYWHERE
-export const toast = {
-  show(message: string, type: ToastType = 'success', title = toastTitles[type]) {
+interface ToastState {
+  toasts: ToastItem[];
+  showToast: (message: string, type?: ToastType, title?: string) => void;
+  removeToast: (id: number) => void;
+}
+
+// Global atomic toast notification store powered by Zustand
+export const useToastStore = create<ToastState>((set) => ({
+  toasts: [],
+
+  showToast: (message: string, type: ToastType = 'success', title?: string) => {
+    const id = Date.now() + Math.random();
     const item: ToastItem = {
-      id: Date.now() + Math.random(),
+      id,
       type,
-      title,
+      title: title ?? toastTitles[type],
       message,
     };
-    listeners.forEach((listener) => listener(item));
+
+    set((state) => ({
+      toasts: [...state.toasts, item],
+    }));
+
+    window.setTimeout(() => {
+      set((state) => ({
+        toasts: state.toasts.filter((t) => t.id !== id),
+      }));
+    }, 3200);
+  },
+
+  removeToast: (id: number) => {
+    set((state) => ({
+      toasts: state.toasts.filter((t) => t.id !== id),
+    }));
+  },
+}));
+
+// Standalone imperative toast dispatcher callable from anywhere in the application
+export const toast = {
+  show(message: string, type: ToastType = 'success', title?: string) {
+    useToastStore.getState().showToast(message, type, title);
   },
   success(message: string, title?: string) {
     this.show(message, 'success', title);
@@ -858,16 +884,12 @@ export const toast = {
     this.show(message, 'warning', title);
   },
 };
+```
 
-interface ToastContextValue {
-  showToast: (message: string, type?: ToastType, title?: string) => void;
-  toast: typeof toast;
-}
-
-const ToastContext = createContext<ToastContextValue>({
-  showToast: (msg, type, title) => toast.show(msg, type, title),
-  toast,
-});
+### 7.2. Viewport Hiển thị Thông báo Retro Neo-Brutalism (`src/components/common/ToastContainer.tsx`):
+```tsx
+import React from 'react';
+import { useToastStore, ToastType } from '../../stores/toastStore';
 
 const toastStyles: Record<ToastType, string> = {
   success: 'bg-mint text-zinc-950 dark:bg-[#356b63] dark:text-[#f3eadc]',
@@ -876,359 +898,281 @@ const toastStyles: Record<ToastType, string> = {
   error: 'bg-coral-soft text-red-950 dark:bg-[#713f3b] dark:text-[#fff0ea]',
 };
 
-// Root provider rendering the Neo-Brutalism toast overlay
-export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-
-  useEffect(() => {
-    const handleNewToast = (item: ToastItem) => {
-      setToasts((prev) => [...prev, item]);
-      window.setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== item.id));
-      }, 3200);
-    };
-
-    listeners.add(handleNewToast);
-    return () => {
-      listeners.delete(handleNewToast);
-    };
-  }, []);
-
-  const value: ToastContextValue = {
-    showToast: (msg, type, title) => toast.show(msg, type, title),
-    toast,
-  };
+// Presentational toast viewport consuming Zustand state with zero re-rendering impact on application tree
+export const ToastContainer: React.FC = () => {
+  const toasts = useToastStore((state) => state.toasts);
+  const removeToast = useToastStore((state) => state.removeToast);
 
   return (
-    <ToastContext.Provider value={value}>
-      {children}
-      <div
-        aria-live="polite"
-        className="pointer-events-none fixed right-4 top-20 z-[100] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-3"
-      >
-        {toasts.map((item) => (
-          <div
-            key={item.id}
-            role="status"
-            className={`pointer-events-auto overflow-hidden rounded-lg border-2 border-zinc-950 shadow-[5px_5px_0_#18181b] dark:border-[#737c91] dark:shadow-[5px_5px_0_#090b10] ${toastStyles[item.type]}`}
-          >
-            <div className="flex items-start gap-3 p-4">
-              <span
-                className={`mt-1 size-2.5 shrink-0 rounded-full border border-zinc-950 ${
-                  item.type === 'success'
-                    ? 'bg-emerald-600'
-                    : item.type === 'info'
-                      ? 'bg-blue-700'
-                      : item.type === 'warning'
-                        ? 'bg-amber-600'
-                        : 'bg-red-600'
-                }`}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-black">{item.title}</div>
-                <p className="mt-1 text-xs font-medium leading-5 opacity-90">{item.message}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== item.id))}
-                aria-label="Dismiss notification"
-                className="grid size-7 shrink-0 place-items-center rounded-md border border-current text-sm font-black"
-              >
-                ×
-              </button>
+    <div
+      aria-live="polite"
+      className="pointer-events-none fixed right-4 top-20 z-[100] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-3"
+    >
+      {toasts.map((item) => (
+        <div
+          key={item.id}
+          role="status"
+          className={`pointer-events-auto overflow-hidden rounded-lg border-2 border-zinc-950 shadow-[5px_5px_0_#18181b] dark:border-[#737c91] dark:shadow-[5px_5px_0_#090b10] ${toastStyles[item.type]}`}
+        >
+          <div className="flex items-start gap-3 p-4">
+            <span
+              className={`mt-1 size-2.5 shrink-0 rounded-full border border-zinc-950 ${
+                item.type === 'success'
+                  ? 'bg-emerald-600'
+                  : item.type === 'info'
+                    ? 'bg-blue-700'
+                    : item.type === 'warning'
+                      ? 'bg-amber-600'
+                      : 'bg-red-600'
+              }`}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-black">{item.title}</div>
+              <p className="mt-1 text-xs font-medium leading-5 opacity-90">{item.message}</p>
             </div>
-            <div className="toast-progress h-1 bg-zinc-950/50 dark:bg-white/50" />
+            <button
+              type="button"
+              onClick={() => removeToast(item.id)}
+              aria-label="Dismiss notification"
+              className="grid size-7 shrink-0 place-items-center rounded-md border border-current text-sm font-black hover:bg-black/10 dark:hover:bg-white/10"
+            >
+              ×
+            </button>
           </div>
-        ))}
-      </div>
-    </ToastContext.Provider>
+          <div className="toast-progress h-1 bg-zinc-950/55 dark:bg-white/55" />
+        </div>
+      ))}
+    </div>
   );
 };
-
-export function useToast(): ToastContextValue {
-  return useContext(ToastContext);
-}
 ```
 
----
+### 7.3. Phân tích Chuyên sâu So sánh Kỹ thuật: Zustand Store vs React Context cho Toast
 
-### 7.2. Phân tích Chuyên sâu Cơ chế Hoạt động của Toast Event Bus (Deep Dive: Architecture & Implementation Details)
+#### 1. Nguy cơ Re-Render Cascade của React Context:
+- Khi dùng React Context (`<ToastProvider>`), mảng state `toasts` nằm ngay bên trong Provider bọc ngoài cùng ứng dụng.
+- Mỗi khi có toast mới xuất hiện hoặc biến mất sau 3.2s, component `ToastProvider` bắt buộc phải re-render.
+- Dù đã dùng `useMemo` cho `value`, nhưng nếu một consumer lắng nghe Context, bất kỳ sự thay đổi tham chiếu nào cũng có nguy cơ kéo theo re-render không mong muốn cho các components bên dưới.
+- Đặc biệt, trong trường hợp lỗi thực tế ở phiên trước: khi một modal xóa tài nguyên và gọi hàm toast từ Context, reference không ổn định của hàm show trong Context đã kích hoạt lại các hook `useEffect` phụ thuộc, dẫn tới việc component gửi thêm các request load dữ liệu ngầm lên backend khi tài nguyên đã bị xóa, sinh ra lỗi 404 kép ("Failed to load monitor: Monitor not found").
 
-Thành phần Toast tại [src/context/ToastContext.tsx](src/context/ToastContext.tsx) được thiết kế theo mô hình **Hybrid Event Bus**, kết hợp giữa Singleton Event Bus của JavaScript và React State Management.
-
-#### ❓ Tại sao React Context thông thường là chưa đủ?
-- Thông thường, các thư viện Toast trong React dựa hoàn toàn vào React Context (`const { showToast } = useToast()`).
-- Tuy nhiên, React Hooks **chỉ có thể được gọi bên trong các Functional Components hoặc Custom Hooks**.
-- Thách thức thực tế: Khi xảy ra lỗi mạng trong Axios Interceptor (`api.ts`), hoặc khi nhận được gói tin cảnh báo sập server từ kết nối ngầm `EventSource` (SSE listener), các hàm này là **code JavaScript thuần túy nằm ngoài cây component React**. Nếu chỉ dùng Context truyền thống, chúng hoàn toàn bất lực và không có cách nào hiển thị thông báo Toast lên màn hình người dùng!
-
-#### ⚙️ Cơ chế hoạt động của Hybrid Event Bus:
-1. **Bể chứa thính giả Module-Level (`const listeners = new Set<ToastListener>()`):**
-   - Biến `listeners` được khai báo ở phạm vi module (ngoài component). Nó tồn tại xuyên suốt vòng đời của ứng dụng và có thể truy cập được từ bất kỳ đâu.
-   - Sử dụng `Set` thay vì `Array` để đảm bảo mỗi listener chỉ được đăng ký duy nhất 1 lần, hỗ trợ hàm `delete` với độ phức tạp $O(1)$.
-2. **Đối tượng điều phối mệnh lệnh `toast` (Imperative Dispatcher):**
-   - Đối tượng `toast` là một Singleton chứa các phương thức `show`, `success`, `error`, `info`, `warning`.
-   - Khi được gọi: `toast.show(message, type, title)`:
-     - Tạo ra một `ToastItem` với ID duy nhất bằng công thức `Date.now() + Math.random()`.
-     - Lặp qua toàn bộ các listener đang đăng ký trong `Set` và bắn item tới:
-       ```typescript
-       listeners.forEach((listener) => listener(item));
-       ```
-3. **Cầu nối React State trong `ToastProvider`:**
-   - Component `ToastProvider` là nơi lưu trữ mảng state `toasts: ToastItem[]`.
-   - Trong `useEffect`:
-     ```typescript
-     const handleNewToast = (item: ToastItem) => {
-       setToasts((prev) => [...prev, item]);
-       window.setTimeout(() => {
-         setToasts((prev) => prev.filter((t) => t.id !== item.id));
-       }, 3200);
-     };
-
-     listeners.add(handleNewToast);
-     return () => {
-       listeners.delete(handleNewToast);
-     };
-     ```
-   - Khi có bất kỳ ai gọi `toast.success('Done')` (dù trong React hay ngoài React), hàm `handleNewToast` được kích hoạt $\rightarrow$ đẩy `item` vào state $\rightarrow$ React re-render và hiển thị thẻ Toast.
-   - Sau đúng $3200\text{ms}$ (3.2 giây), `window.setTimeout` sẽ tự động lọc bỏ `item` đó khỏi mảng state để Toast biến mất.
-   - Khi component `ToastProvider` unmount, hàm cleanup gọi `listeners.delete(handleNewToast)` để chống rò rỉ bộ nhớ.
-4. **Hiệu ứng Thanh đếm ngược Retro (`toast-progress`):**
-   - Phía dưới mỗi thẻ Toast có một thanh bar: `<div className="toast-progress h-1 bg-zinc-950/50" />`.
-   - Trong file `src/index.css`:
-     ```css
-     .toast-progress {
-       animation: toast-countdown 3.2s linear forwards;
-       transform-origin: left;
-     }
-
-     @keyframes toast-countdown {
-       from { transform: scaleX(1); }
-       to { transform: scaleX(0); }
-     }
-     ```
-   - Thời gian chạy animation của CSS ($3.2\text{s}$) khớp chính xác $100\%$ với thời gian `setTimeout(..., 3200)` của JavaScript. Thanh bar sẽ co dần từ chiều rộng $100\%$ về $0\%$ từ trái sang phải, tạo cảm giác trực quan sinh động và tự nhiên theo phong cách Retro Neo-Brutalism.
+#### 2. Lợi thế Tuyệt đối của Zustand Store:
+- **Tách biệt hoàn toàn State và UI:** State `toasts` được giữ trong bộ nhớ Zustand bên ngoài cây Virtual DOM. Chỉ component duy nhất đăng ký selector `state => state.toasts` (chính là `<ToastContainer />`) bị re-render khi toasts thay đổi.
+- **Zero Provider Overhead:** Không cần bọc `<ToastProvider>` làm sâu thêm cây DOM của ứng dụng.
+- **Triệt tiêu hoàn toàn Hook Adapter & Dependency Array:** Việc gọi trực tiếp `toast.success(...)` hoặc `toast.error(...)` loại bỏ hoàn toàn wrapper hook, không yêu cầu khai báo vào mảng phụ thuộc (`deps`) của `useCallback` hay `useEffect`, ngăn ngừa 100% nguy cơ stale closures hoặc re-render loops.
 
 ---
 
-## 8. Realtime Server-Sent Events (SSE) Client Architecture (`hooks/useRealtimeStream.ts`)
+## 8. Realtime Server-Sent Events (SSE) Client Architecture (`stores/realtimeStore.ts`)
 
-Khi các màn hình Dashboard (Overview, Monitors, Incidents) cần nhận cập nhật trực tiếp theo thời gian thực từ Backend mà không phải liên tục polling HTTP, ứng dụng sử dụng hook chuyên dụng `useRealtimeStream`.
+Khi các màn hình Dashboard (Overview, Monitors, Incidents) cần nhận cập nhật trực tiếp theo thời gian thực từ Backend mà không phải liên tục polling HTTP, ứng dụng sử dụng kiến trúc kết nối SSE duy nhất qua Zustand Store kết hợp mô hình Pub/Sub.
 
-### 8.1. Đặc tả kỹ thuật SSE Client:
-1. Kết nối endpoint: `GET /api/sse/monitors?token=<accessToken>`.
-2. Tự động parse các sự kiện nghiệp vụ:
-   - `CONNECTED`: Xác thực kết nối thành công.
-   - `MONITOR_PING`: Nhận metric ping tức thời khi Ping Engine kiểm tra xong một monitor.
-   - `INCIDENT_ALERT`: Nhận cảnh báo khi monitor bị sập hoặc phục hồi kèm AI Post-Mortem.
-3. Bỏ qua các comment heartbeat `: heartbeat\n\n` từ server.
-4. Tự động phục hồi kết nối (Exponential Reconnect) khi mất mạng hoặc khi người dùng quay lại tab trình duyệt (`visibilitychange`).
+### 8.1. Tại sao Quản lý SSE Connection trong Zustand Store là Best Practice Thực tế?
+1. **Triệt tiêu kết nối Socket thừa (Single Socket Lifecycle):**
+   - Nếu quản lý `EventSource` bên trong React Hook cục bộ hoặc từng Page: khi người dùng mở nhiều tabs hoặc khi nhiều components trên cùng một trang cùng gọi hook, trình duyệt sẽ mở đồng thời bấy nhiêu kết nối SSE song song về máy chủ. Điều này nhanh chóng làm nghẽn số lượng kết nối tối đa của trình duyệt (giới hạn 6 kết nối HTTP/1.1 trên mỗi domain) và lãng phí tài nguyên backend.
+   - Quản lý qua Zustand Store `realtimeStore.ts` đảm bảo toàn bộ ứng dụng chỉ duy trì **duy nhất 1 kết nối `EventSource` nền** cho mỗi phiên đăng nhập của người dùng.
+2. **Loại bỏ Re-Render Cascading của React Context:**
+   - Nếu bọc qua `RealtimeContext`, mỗi khi cờ `isConnected` hoặc sự kiện mới đến thay đổi state trong Context, mọi component tiêu thụ Context đều bị kích hoạt re-render.
+   - Với Zustand Fine-grained Selectors:
+     - Header chỉ lắng nghe `const isConnected = useRealtimeStore(s => s.isConnected)` để bật/tắt chấm xanh stream mà không quan tâm payload ping.
+     - Monitor Table / Incident Timeline chỉ đăng ký nhận dữ liệu qua hàm callback Pub/Sub mà không làm re-render toàn bộ layout cha.
 
-### 8.2. Khuôn mẫu triển khai chuẩn (`src/hooks/useRealtimeStream.ts`):
+### 8.2. Cấu trúc Realtime Store (`src/stores/realtimeStore.ts`):
 ```typescript
-import { useEffect, useRef, useState } from 'react';
-import { useAuthStore } from '../stores/authStore';
-import { SseIncidentAlertEvent, SseMonitorPingEvent } from '../types/api';
+import { create } from 'zustand';
 import { API_BASE_URL } from '../config/constants';
-import { toast } from '../context/ToastContext';
+import { SseIncidentAlertEvent, SseMonitorPingEvent, SseServerEvent } from '../types/api';
+import { toast } from './toastStore';
 
-interface UseRealtimeStreamOptions {
-  onPing?: (event: SseMonitorPingEvent) => void;
-  onIncident?: (event: SseIncidentAlertEvent) => void;
+type PingSubscriber = (event: SseMonitorPingEvent) => void;
+type IncidentSubscriber = (event: SseIncidentAlertEvent) => void;
+
+interface RealtimeState {
+  isConnected: boolean;
+  lastPingEvent: SseMonitorPingEvent | null;
+  lastIncidentEvent: SseIncidentAlertEvent | null;
+  connect: (accessToken: string) => void;
+  disconnect: () => void;
+  subscribePing: (cb: PingSubscriber) => () => void;
+  subscribeIncident: (cb: IncidentSubscriber) => () => void;
 }
 
-// Manage lifecycle of native EventSource connection for live telemetry updates
-export function useRealtimeStream(options: UseRealtimeStreamOptions = {}) {
-  const { accessToken, isAuthenticated } = useAuthStore();
-  const [isConnected, setIsConnected] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
+let eventSourceInstance: EventSource | null = null;
+let currentToken: string | null = null;
+const pingSubscribers = new Set<PingSubscriber>();
+const incidentSubscribers = new Set<IncidentSubscriber>();
 
-  useEffect(() => {
-    if (!isAuthenticated || !accessToken) {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-        setIsConnected(false);
-      }
+// Central Zustand store managing the single background SSE EventSource socket and event fan-out
+export const useRealtimeStore = create<RealtimeState>((set) => ({
+  isConnected: false,
+  lastPingEvent: null,
+  lastIncidentEvent: null,
+
+  connect: (accessToken: string) => {
+    // Avoid re-establishing identical active connection on component re-renders
+    if (
+      eventSourceInstance &&
+      eventSourceInstance.readyState !== EventSource.CLOSED &&
+      currentToken === accessToken
+    ) {
       return;
     }
 
+    if (eventSourceInstance) {
+      eventSourceInstance.close();
+      eventSourceInstance = null;
+    }
+
+    currentToken = accessToken;
     const sseUrl = `${API_BASE_URL}/sse/monitors?token=${encodeURIComponent(accessToken)}`;
     const es = new EventSource(sseUrl);
-    eventSourceRef.current = es;
+    eventSourceInstance = es;
 
     es.onopen = () => {
-      setIsConnected(true);
+      set({ isConnected: true });
     };
 
     es.onmessage = (event) => {
       try {
-        const payload = JSON.parse(event.data);
+        const payload = JSON.parse(event.data) as SseServerEvent;
 
-        if (payload.type === 'MONITOR_PING' && options.onPing) {
-          options.onPing(payload as SseMonitorPingEvent);
+        if (payload.type === 'MONITOR_PING') {
+          set({ lastPingEvent: payload });
+          pingSubscribers.forEach((cb) => {
+            try {
+              cb(payload);
+            } catch (err) {
+              console.error('[Realtime SSE] Error in ping subscriber callback:', err);
+            }
+          });
         } else if (payload.type === 'INCIDENT_ALERT') {
-          const alert = payload as SseIncidentAlertEvent;
-          if (alert.status === 'ongoing') {
-            toast.error(`Monitor ${alert.monitorId} is down!`, 'Incident Alert');
-          } else if (alert.status === 'resolved') {
-            toast.success(`Monitor ${alert.monitorId} recovered.`, 'Incident Resolved');
+          set({ lastIncidentEvent: payload });
+          if (payload.status === 'ongoing') {
+            toast.error(
+              payload.errorMessage || 'Service disruption detected on monitored endpoint.',
+              'Incident Alert'
+            );
+          } else if (payload.status === 'resolved') {
+            toast.success(
+              'Monitored endpoint has fully recovered.',
+              'Incident Resolved'
+            );
           }
-          if (options.onIncident) {
-            options.onIncident(alert);
-          }
+          incidentSubscribers.forEach((cb) => {
+            try {
+              cb(payload);
+            } catch (err) {
+              console.error('[Realtime SSE] Error in incident subscriber callback:', err);
+            }
+          });
         }
       } catch {
-        // Ignore unparseable or heartbeat messages
+        // Discard heartbeat comments and non-JSON data safely
       }
     };
 
     es.onerror = () => {
-      setIsConnected(false);
-      es.close();
+      set({ isConnected: false });
     };
+  },
 
+  disconnect: () => {
+    if (eventSourceInstance) {
+      eventSourceInstance.close();
+      eventSourceInstance = null;
+    }
+    currentToken = null;
+    set({ isConnected: false, lastPingEvent: null, lastIncidentEvent: null });
+  },
+
+  subscribePing: (cb: PingSubscriber) => {
+    pingSubscribers.add(cb);
     return () => {
-      es.close();
-      eventSourceRef.current = null;
-      setIsConnected(false);
+      pingSubscribers.delete(cb);
     };
-  }, [accessToken, isAuthenticated, options]);
+  },
 
-  return { isConnected };
-}
+  subscribeIncident: (cb: IncidentSubscriber) => {
+    incidentSubscribers.add(cb);
+    return () => {
+      incidentSubscribers.delete(cb);
+    };
+  },
+}));
 ```
 
----
+### 8.3. Mô hình Tiêu thụ Sự kiện Trực tiếp từ Zustand Store (`useRealtimeStore`):
 
-### 8.3. Phân tích Chuyên sâu Cơ chế Kết nối & Vòng đời SSE Client (Deep Dive: EventSource Lifecycle & Fault Tolerance)
+Toàn bộ các components và custom hooks trong hệ thống đều trực tiếp tiêu thụ `useRealtimeStore`:
 
-Hook `useRealtimeStream` quản lý toàn bộ vòng đời của kết nối Server-Sent Events từ trình duyệt, đảm bảo kênh streaming luôn ổn định và không làm rò rỉ tài nguyên mạng:
+#### 1. Đọc trạng thái luồng trực tiếp với Atomic Selector (`src/components/common/Header.tsx`):
+```typescript
+import { useRealtimeStore } from '../../stores/realtimeStore';
 
-#### 1. Rào cản Header & Truyền Access Token qua Query Param:
-- Đối tượng Native `window.EventSource` của trình duyệt không cho phép lập trình viên thêm custom headers (không thể truyền `Authorization: Bearer <token>`).
-- Để xác thực, Frontend bắt buộc phải truyền Access Token thông qua URL Query Parameter:
-  ```typescript
-  const sseUrl = `${API_BASE_URL}/sse/monitors?token=${encodeURIComponent(accessToken)}`;
-  const es = new EventSource(sseUrl);
-  ```
-- Phía Backend đã hỗ trợ trích xuất token từ `req.query.token` trong `authMiddleware.ts` để giải quyết triệt để rào cản này.
+export const Header: React.FC<HeaderProps> = () => {
+  // Chỉ re-render khi cờ isConnected thay đổi, hoàn toàn miễn nhiễm với bão sự kiện ping
+  const isConnected = useRealtimeStore((state) => state.isConnected);
+  ...
+};
+```
 
-#### 2. Cơ chế Lọc Bỏ Heartbeat Comment của Server:
-- Phía Backend Node.js định kỳ 30 giây gửi một dòng comment W3C: `: heartbeat\n\n`.
-- Theo đặc tả W3C HTML5 Server-Sent Events, **bất kỳ dòng dữ liệu nào bắt đầu bằng dấu hai chấm (`:`) đều được trình duyệt coi là comment**.
-- Trình duyệt sẽ âm thầm tiếp nhận byte để giữ socket mạng luôn mở qua Nginx Reverse Proxy mà **hoàn toàn không kích hoạt sự kiện `onmessage`**. Do đó, code JavaScript của Frontend không tốn bất kỳ chu kỳ xử lý hay parse JSON thừa thãi nào.
+#### 2. Đăng ký nhận sự kiện Pub/Sub với Auto-Cleanup (`src/hooks/useMonitors.ts` & `src/pages/monitors/MonitorDetailPage.tsx`):
+```typescript
+import { useRealtimeStore } from '../../stores/realtimeStore';
 
-#### 3. Bóc tách và Điều phối Sự kiện Nghiệp vụ trong `onmessage`:
-Khi server gửi dữ liệu nghiệp vụ thực tế, chuỗi JSON được bóc tách:
-- **Sự kiện `MONITOR_PING`:** Phát sinh khi Ping Engine kiểm tra xong một trang web. Dữ liệu chứa `{ monitorId, statusCode, latency, isUp, timestamp }`. Hook gọi callback `options.onPing(event)`. Màn hình Monitors hoặc Overview sẽ nhận event này để cập nhật trực tiếp latency và màu sắc của monitor trên bảng điều khiển ngay tức khắc mà người dùng không cần bấm F5.
-- **Sự kiện `INCIDENT_ALERT`:** Phát sinh khi website bị sập hoặc vừa phục hồi. Hook kiểm tra:
-  - Nếu `alert.status === 'ongoing'`: Gọi ngay `toast.error('Monitor ... is down!', 'Incident Alert')` để cảnh báo màu đỏ tức thì.
-  - Nếu `alert.status === 'resolved'`: Gọi `toast.success('Monitor ... recovered.', 'Incident Resolved')` để báo tin vui màu xanh.
-  - Chuyển tiếp payload vào `options.onIncident(alert)` để cập nhật danh sách sự cố trên trang Incidents.
+const subscribePing = useRealtimeStore((state) => state.subscribePing);
+const subscribeIncident = useRealtimeStore((state) => state.subscribeIncident);
 
-#### 4. Dọn dẹp Kết nối Khi Unmount & Ngắt Phiên:
-- Khi người dùng đăng xuất, hoặc rời khỏi Dashboard, hàm cleanup của `useEffect` lập tức được kích hoạt:
-  ```typescript
+useEffect(() => {
+  const unsubPing = subscribePing(handleRealtimePing);
+  const unsubIncident = subscribeIncident(handleRealtimeIncident);
   return () => {
-    es.close();
-    eventSourceRef.current = null;
-    setIsConnected(false);
+    unsubPing();
+    unsubIncident();
   };
-  ```
-- Lệnh `es.close()` ngay lập tức gửi tín hiệu TCP FIN/RST đóng kênh truyền phát. Phía Backend Express sẽ bắt được sự kiện `req.on('close')` và xóa kết nối ra khỏi `Map<userId, Set<Response>>` trên RAM trong thời gian $O(1)$. Điều này ngăn chặn triệt để hiện tượng rò rỉ socket và cạn kiệt file descriptors trên máy chủ VPS.
+}, [handleRealtimePing, handleRealtimeIncident, subscribePing, subscribeIncident]);
+```
+
+### 8.4. Phân tích Chuyên sâu Cơ chế Kết nối & Vòng đời SSE Client (Deep Dive)
+
+1. **Rào cản Header & Truyền Access Token qua Query Param:**
+   - Đối tượng Native `window.EventSource` của trình duyệt không cho phép thêm custom headers (không thể truyền `Authorization: Bearer <token>`).
+   - Để xác thực, Frontend bắt buộc phải truyền Access Token thông qua URL Query Parameter: `sse/monitors?token=${encodeURIComponent(accessToken)}`.
+   - Phía Backend đã hỗ trợ trích xuất token từ `req.query.token` trong `authMiddleware.ts` để đáp ứng chuẩn kết nối này.
+
+2. **Cơ chế Lọc Bỏ Heartbeat Comment của Server:**
+   - Phía Backend Node.js định kỳ 30 giây gửi một dòng comment W3C: `: heartbeat\n\n`.
+   - Theo đặc tả W3C HTML5 Server-Sent Events, bất kỳ dòng dữ liệu nào bắt đầu bằng dấu hai chấm (`:`) đều được trình duyệt coi là comment.
+   - Trình duyệt sẽ âm thầm tiếp nhận byte để giữ socket mạng luôn mở qua Nginx Reverse Proxy mà hoàn toàn không kích hoạt sự kiện `onmessage`. Khối `try/catch` bổ sung chỉ nhằm bảo vệ ứng dụng khỏi dữ liệu không hợp lệ.
+
+3. **Điều phối Sự kiện Nghiệp vụ Tập trung:**
+   - **Sự kiện `MONITOR_PING`:** Phát sinh khi Ping Engine kiểm tra xong một trang web. Dữ liệu chứa `{ monitorId, statusCode, latency, isUp, timestamp }`. Store cập nhật `lastPingEvent` và fan-out tới các callback `pingSubscribers`.
+   - **Sự kiện `INCIDENT_ALERT`:** Phát sinh khi website bị sập hoặc vừa phục hồi. Store tự động kích hoạt thông báo Toast cấp hệ thống (`toast.error` hoặc `toast.success`) mà không cần chờ component UI nào bắt được sự kiện, đồng thời fan-out tới `incidentSubscribers`.
+
+4. **Dọn dẹp Kết nối Khi Unmount & Đăng xuất:**
+   - Kết nối SSE duy nhất được khởi tạo tại `DashboardLayout.tsx` khi có `accessToken`.
+   - Khi người dùng đăng xuất hoặc đóng tab, hàm `disconnect()` được gọi để thực thi `eventSourceInstance.close()`. Lệnh này ngay lập tức gửi tín hiệu TCP FIN/RST đóng kênh truyền phát, giải phóng tài nguyên socket trên máy chủ.
 
 ---
 
 ## 9. Custom Hooks Pattern & Domain Separation (`hooks/`)
 
-Khi phát triển các màn hình nghiệp vụ, logic fetch dữ liệu, debounce tìm kiếm, và quản trị clipboard phải được tách thành Custom Hooks độc lập để Component không bị "phình to":
+Khi phát triển các màn hình nghiệp vụ, logic fetch dữ liệu, mutations, debounce và xử lý sự kiện realtime phải được bóc tách vào Custom Hooks độc lập để Component giữ đúng vai trò Presentation Layer:
 
-### 9.1. Hook tải và quản lý danh sách Monitors (`src/hooks/useMonitors.ts`):
-```typescript
-import { useState, useEffect, useCallback } from 'react';
-import { monitorService } from '../services/monitorService';
-import { MonitorResponseDto } from '../types/monitor';
-import { getApiErrorMessage } from '../lib/apiError';
-import { useToast } from '../context/ToastContext';
+### 9.1. Hook Quản lý Danh sách Monitors (`src/hooks/useMonitors.ts`):
+- Đảm nhận toàn bộ nghiệp vụ danh sách: fetch monitors, instant ping với cooldown countdown timer 15s, create, update, toggle, delete.
+- Cập nhật tức thì (optimistic) trạng thái của monitor khi trigger instant ping thành công mà không chờ đợi độ trễ của SSE.
+- Lắng nghe realtime SSE qua `subscribePing` và `subscribeIncident` từ `useRealtimeStore`.
 
-// Encapsulate monitor data fetching, mutation operations, and loading states
-export function useMonitors() {
-  const [monitors, setMonitors] = useState<MonitorResponseDto[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { showToast } = useToast();
+### 9.2. Hook Chi tiết Telemetry Monitor (`src/hooks/useMonitorDetail.ts`):
+- Đảm nhận quản lý state của một monitor cụ thể, lịch sử đo độ trễ metrics, danh sách incidents, bộ chọn khung thời gian (`range: 1h | 24h | 7d`).
+- Quản lý cooldown 15s cho instant ping, mutation toggle, update, delete.
+- Chuẩn hóa tọa độ SVG chart (`points: string`, `latestLatency`, `uptimePercentage`) để component UI chỉ việc binding vào thẻ `<polyline />`.
+- Đảm bảo an toàn khi xóa bằng `isDeletedRef` chống re-trigger fetch 404.
 
-  const fetchMonitors = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await monitorService.getMonitors();
-      setMonitors(data);
-    } catch (err) {
-      const msg = getApiErrorMessage(err);
-      setError(msg);
-      showToast(msg, 'error', 'Failed to load monitors');
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
-
-  useEffect(() => {
-    fetchMonitors();
-  }, [fetchMonitors]);
-
-  const toggleMonitor = async (id: string) => {
-    try {
-      const updated = await monitorService.toggleMonitor(id);
-      setMonitors((prev) => prev.map((m) => (m.id === id ? updated : m)));
-      showToast(`Monitor ${updated.isActive ? 'resumed' : 'paused'}.`, 'info', 'Status updated');
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Toggle failed');
-    }
-  };
-
-  const deleteMonitor = async (id: string) => {
-    try {
-      await monitorService.deleteMonitor(id);
-      setMonitors((prev) => prev.filter((m) => m.id !== id));
-      showToast('Monitor removed from workspace.', 'success', 'Deleted');
-    } catch (err) {
-      showToast(getApiErrorMessage(err), 'error', 'Delete failed');
-    }
-  };
-
-  return {
-    monitors,
-    loading,
-    error,
-    refresh: fetchMonitors,
-    toggleMonitor,
-    deleteMonitor,
-  };
-}
-```
-
-### 9.2. Hook Debounce cho Ô tìm kiếm (`src/hooks/useDebounce.ts`):
-```typescript
-import { useState, useEffect } from 'react';
-
-// Delay state update until user stops typing for specified duration
-export function useDebounce<T>(value: T, delay = 300): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [value, delay]);
-
-  return debouncedValue;
-}
-```
+### 9.3. Hook Quản lý Sự cố & Phân tích AI (`src/hooks/useIncidents.ts`):
+- Quản lý danh sách incidents theo tab `ongoing` và `resolved`, tự động chọn phần tử đầu tiên khi đổi tab.
+- Mutation giải quyết thủ công `resolveIncident(id)` và tái phân tích `reanalyzeIncident(id)`.
+- Tự động nhận diện sự kiện `INCIDENT_ALERT` thời gian thực từ SSE để cập nhật timeline.
 
 ---
 

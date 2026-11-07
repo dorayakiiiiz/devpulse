@@ -8,7 +8,7 @@ import { AuthDecorations } from '../../components/auth/AuthDecorations';
 import { OtpInput } from '../../components/auth/OtpInput';
 import { authService } from '../../services/authService';
 import { useAuthStore } from '../../stores/authStore';
-import { useToast } from '../../context/ToastContext';
+import { toast } from '../../stores/toastStore';
 import { ApiErrorResponse } from '../../types/api';
 import { getApiErrorMessage } from '../../lib/apiError';
 
@@ -20,7 +20,6 @@ export const AuthPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { setAuth } = useAuthStore();
-  const { showToast } = useToast();
 
   const [mode, setMode] = useState<AuthMode>('login');
   const [step, setStep] = useState<AuthStep>('credentials');
@@ -60,7 +59,7 @@ export const AuthPage: React.FC = () => {
       if (mode === 'login') {
         const result = await authService.login({ email, password });
         setAuth(result.user, result.accessToken);
-        showToast('Welcome back to your DevPulse workspace.', 'success', 'Signed in');
+        toast.success('Welcome back to your DevPulse workspace.', 'Signed in');
 
         const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
         navigate(from, { replace: true });
@@ -71,7 +70,7 @@ export const AuthPage: React.FC = () => {
         await authService.register({ name, email, password });
         setStep('otp');
         setCountdown(60);
-        showToast('A 6-digit verification code was sent to your email.', 'info', 'Code sent');
+        toast.info('A 6-digit verification code was sent to your email.', 'Code sent');
         return;
       }
 
@@ -79,7 +78,7 @@ export const AuthPage: React.FC = () => {
         await authService.forgotPassword(email);
         setStep('otp');
         setCountdown(60);
-        showToast('Password reset code was sent to your email.', 'info', 'Code sent');
+        toast.info('Password reset code was sent to your email.', 'Code sent');
         return;
       }
     } catch (err) {
@@ -88,7 +87,7 @@ export const AuthPage: React.FC = () => {
 
       // Transition to OTP if account is pending activation
       if (axiosErr.response?.status === 403 && errorMessage.toLowerCase().includes('verify')) {
-        showToast('Please verify your email address to complete activation.', 'warning', 'Email verification');
+        toast.warning('Please verify your email address to complete activation.', 'Email verification');
         setMode('register');
         setStep('otp');
         setCountdown(60);
@@ -98,7 +97,7 @@ export const AuthPage: React.FC = () => {
           // Keep on OTP step even if resend rate-limited
         }
       } else {
-        showToast(errorMessage, 'error', 'Authentication failed');
+        toast.error(errorMessage, 'Authentication failed');
       }
     } finally {
       setLoading(false);
@@ -109,7 +108,7 @@ export const AuthPage: React.FC = () => {
     e.preventDefault();
     const otpCode = otp.join('');
     if (otpCode.length !== 6) {
-      showToast('Please enter all 6 digits of the verification code.', 'warning', 'Invalid code');
+      toast.warning('Please enter all 6 digits of the verification code.', 'Invalid code');
       return;
     }
 
@@ -118,20 +117,20 @@ export const AuthPage: React.FC = () => {
       if (mode === 'register') {
         const result = await authService.verifyEmail({ email, otp: otpCode });
         setAuth(result.user, result.accessToken);
-        showToast('Your account is verified and ready to use.', 'success', 'Account activated');
+        toast.success('Your account is verified and ready to use.', 'Account activated');
         navigate('/', { replace: true });
         return;
       }
 
       if (mode === 'forgot') {
         if (newPassword !== confirmPassword) {
-          showToast('New password and confirmation do not match.', 'error', 'Passwords do not match');
+          toast.error('New password and confirmation do not match.', 'Passwords do not match');
           setLoading(false);
           return;
         }
 
         if (newPassword.length < 8) {
-          showToast('Password must be at least 8 characters long.', 'warning', 'Password too short');
+          toast.warning('Password must be at least 8 characters long.', 'Password too short');
           setLoading(false);
           return;
         }
@@ -143,11 +142,11 @@ export const AuthPage: React.FC = () => {
         setNewPassword('');
         setConfirmPassword('');
         setAuthNotice('Password updated. You can sign in now.');
-        showToast('Your verification code and new password were accepted.', 'success', 'Password updated');
+        toast.success('Your verification code and new password were accepted.', 'Password updated');
       }
     } catch (err) {
       const errorMessage = getApiErrorMessage(err);
-      showToast(errorMessage, 'error', 'Verification error');
+      toast.error(errorMessage, 'Verification error');
     } finally {
       setLoading(false);
     }
@@ -163,10 +162,10 @@ export const AuthPage: React.FC = () => {
         await authService.forgotPassword(email);
       }
       setCountdown(60);
-      showToast('A 6-digit verification code was sent to your email.', 'info', 'Code sent');
+      toast.info('A 6-digit verification code was sent to your email.', 'Code sent');
     } catch (err) {
       const msg = getApiErrorMessage(err);
-      showToast(msg, 'error', 'Resend failed');
+      toast.error(msg, 'Resend failed');
     } finally {
       setLoading(false);
     }

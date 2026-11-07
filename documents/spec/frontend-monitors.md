@@ -229,3 +229,4 @@ src/
 - [ ] Xem chi tiết monitor hiển thị đúng 3 thẻ Stat, biểu đồ Latency, SSL Certificate và Lịch sử Sự cố.
 - [ ] Chuyển đổi dải thời gian biểu đồ (1h / 24h / 7d) gọi đúng API với query param `range`.
 - [ ] Chạy `npm.cmd run type-check` và `npm.cmd run build` đạt **0 errors**.
+

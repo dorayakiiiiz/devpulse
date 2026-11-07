@@ -239,3 +239,4 @@ export const MonitorModal: React.FC<MonitorModalProps> = ({ monitor, onClose, on
     </div>
   );
 };
+

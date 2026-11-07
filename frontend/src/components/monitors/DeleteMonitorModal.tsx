@@ -68,3 +68,4 @@ export const DeleteMonitorModal: React.FC<DeleteMonitorModalProps> = ({
     </div>
   );
 };
+

@@ -21,3 +21,4 @@ export const Stat: React.FC<StatProps> = ({ label, value, note, color }) => {
     </div>
   );
 };
+

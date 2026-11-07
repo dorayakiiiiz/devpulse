@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
-import { ToastProvider } from './context/ToastContext';
+import { ToastContainer } from './components/common/ToastContainer';
 import { AppRoutes } from './routes/AppRoutes';
 import { useAuthStore } from './stores/authStore';
 import { authService } from './services/authService';
@@ -31,9 +31,8 @@ export const App: React.FC = () => {
 
   return (
     <BrowserRouter>
-      <ToastProvider>
-        <AppRoutes />
-      </ToastProvider>
+      <AppRoutes />
+      <ToastContainer />
     </BrowserRouter>
   );
 };
