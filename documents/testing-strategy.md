@@ -392,95 +392,12 @@ afterEach(() => {
 
 ---
 
-## 6. Thiết Kế GitHub Actions CI Pipeline (`.github/workflows/ci.yml`)
+## 6. Định Hướng Thiết Kế CI Pipeline
 
-Dưới đây là mã cấu hình hoàn chỉnh của Workflow CI, sẵn sàng đưa vào triển khai tại `.github/workflows/ci.yml`:
-
-```yaml
-name: DevPulse Continuous Integration (CI)
-
-on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  # ========================================================
-  # JOB 1: BACKEND CI (Type-Check, Unit & Integration Tests)
-  # ========================================================
-  backend-ci:
-    name: Backend Quality Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js Runtime
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: dev-pulse/backend/package-lock.json
-
-      - name: Install Backend Dependencies
-        working-directory: dev-pulse/backend
-        run: npm ci
-
-      - name: Strict TypeScript Compilation Check
-        working-directory: dev-pulse/backend
-        run: npm run type-check
-
-      - name: Run Backend Unit & Integration Test Suites
-        working-directory: dev-pulse/backend
-        env:
-          NODE_ENV: test
-          JWT_SECRET: test_jwt_secret_super_secure_key_12345
-          JWT_EXPIRES_IN: 15m
-          REFRESH_TOKEN_EXPIRES_IN: 7d
-        run: npm run test:coverage
-
-  # ========================================================
-  # JOB 2: FRONTEND CI (Type-Check, Unit Tests & Production Build)
-  # ========================================================
-  frontend-ci:
-    name: Frontend Quality Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js Runtime
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: dev-pulse/frontend/package-lock.json
-
-      - name: Install Frontend Dependencies
-        working-directory: dev-pulse/frontend
-        run: npm ci
-
-      - name: Strict TypeScript Compilation Check
-        working-directory: dev-pulse/frontend
-        run: npm run type-check
-
-      - name: Run Frontend Component & Hook Tests
-        working-directory: dev-pulse/frontend
-        run: npm run test
-
-      - name: Verify Production Bundle Build
-        working-directory: dev-pulse/frontend
-        run: npm run build
-```
+Quy trình CI trên GitHub Actions sẽ đảm nhận vai trò Quality Gate độc lập cho cả Backend và Frontend:
+- **Backend Quality Gate:** Kiểm tra biên dịch TypeScript (`type-check`), chạy toàn bộ test suite Unit & Integration (`npm test`) trên runner Ubuntu cách ly.
+- **Frontend Quality Gate:** Kiểm tra type-checking (`type-check`), chạy toàn bộ test suite Component & Hook (`npm test`), và xác thực build đóng gói sản phẩm (`npm run build`).
+- Cấu hình file workflow cụ thể sẽ được thiết kế riêng biệt theo kiến trúc CI/CD thực tế của hệ thống.
 
 ---
 

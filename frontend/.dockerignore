@@ -1,6 +1,9 @@
 node_modules
 dist
+tests
 .git
-.gitignore
-*.log
-
+.github
+.env
+.env.*
+*.md
+npm-debug.log*

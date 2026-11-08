@@ -16,37 +16,45 @@ Hệ thống được thiết kế để triển khai trên một Linux VPS ch�
 
 ### 2.2. Resource Allocation Plan
 
-| Service | Container Name | Memory Limit | Memory Reservation |
-| :--- | :--- | :--- | :--- |
-| Gateway | `devpulse-gateway` | 64MB | 20MB |
-| Backend API | `devpulse-backend` | 256MB | 128MB |
-| Database | `devpulse-database` | 384MB | 256MB |
+| Service | Container Name | Image Source | Memory Limit | Memory Reservation | CPU Limit |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Edge Gateway** | `devpulse-gateway` | `nginx:1.27-alpine` (official) | 64MB | 20MB | 0.20 |
+| **Frontend SPA** | `devpulse-frontend` | `dorayakiiiiz/devpulse-frontend` | 64MB | 20MB | 0.20 |
+| **Backend API** | `devpulse-backend` | `dorayakiiiiz/devpulse-backend` | 256MB | 128MB | 0.50 |
+| **Database** | `devpulse-database` | `mongo:7.0` (official) | 384MB | 256MB | 0.30 |
 
-Toàn bộ hệ thống tiêu thụ thông thường dưới 600MB RAM, đảm bảo hoạt động an toàn và ổn định trên VPS có dung lượng 1GB RAM.
+Hệ thống hoạt động thực tế chỉ tiêu thụ ~390MB RAM (Gateway ~8MB, Frontend ~8MB, Backend ~120MB, MongoDB ~256MB), đảm bảo hoạt động tuyệt đối an toàn và ổn định trên VPS 1GB RAM với hơn 600MB RAM dự phòng cho hệ điều hành.
 
 ---
 
 ## 3. Containerization Strategy
 
-### 3.1. Backend Multi-Stage Dockerfile
+### 3.1. Phân Tách Độc Lập Giữa Edge Gateway và Frontend (Best Practice vs Monolith Coupling)
+- **Vấn đề của việc gom Nginx vào Frontend:** Nếu gộp Nginx Reverse Proxy và static files của Frontend vào chung 1 container, mỗi khi thay đổi UI (CSS/HTML), toàn bộ Edge Gateway phải khởi động lại, làm gián đoạn mọi kết nối SSE thời gian thực và việc proxy đến API. Ngược lại, nếu muốn sửa rule proxy hoặc renew SSL, lại phải build lại image Frontend.
+- **Giải pháp chuẩn mực thực tế (Decoupled Microservices):**
+  - `devpulse-gateway`: Đóng vai trò Edge Reverse Proxy duy nhất, lắng nghe port 80/443, xử lý SSL Let's Encrypt, Gzip, điều phối lưu lượng `/api` sang backend và `/*` sang frontend.
+  - `devpulse-frontend`: Container độc lập chạy Nginx Alpine tối giản chỉ phục vụ static files của React SPA trên port 80 nội bộ, xử lý `try_files` định tuyến React Router và cache static assets.
+
+### 3.2. Backend Multi-Stage Dockerfile
 Quy trình build multi-stage của backend phân tách thành hai stage nhằm tối ưu image size và bảo mật:
-- Stage 1 Builder: Sử dụng base image đầy đủ để cài đặt devDependencies và build source code TypeScript thành JavaScript.
-- Stage 2 Runner: Sử dụng image tối giản dựa trên Alpine Linux `node:20-alpine`, chỉ copy thư mục `dist/` đã build và production dependencies. Ứng dụng chạy dưới quyền non-root user `USER node` nhằm ngăn ngừa việc leo thang đặc quyền.
+- Stage 1 Builder: Sử dụng base image `node:20-alpine`, cài đặt toàn bộ dependencies và biên dịch source code TypeScript sang JavaScript (`npm run build`). Sau đó prune devDependencies để giữ lại production dependencies.
+- Stage 2 Runner: Sử dụng image tối giản `node:20-alpine`, chỉ copy thư mục `dist/` đã build và `node_modules` production. Ứng dụng chạy dưới quyền non-root user `USER node` nhằm ngăn ngừa leo thang đặc quyền.
 - Kích thước Docker image hoàn thiện: Dưới 120MB.
 
-### 3.2. Frontend Multi-Stage Dockerfile
-- Stage 1 Builder: Thực thi cài đặt dependencies và build static files tối ưu qua Vite.
-- Stage 2 Runner: Sử dụng web server Nginx Alpine để serve các static files HTML, CSS và JavaScript, giúp tiết kiệm tối đa RAM và CPU.
-- Kích thước Docker image hoàn thiện: Dưới 30MB.
+### 3.3. Frontend Multi-Stage Dockerfile
+- Stage 1 Builder: Cài đặt dependencies và thực thi build static bundle tối ưu qua Vite (`npm run build`).
+- Stage 2 Runner: Sử dụng web server `nginx:1.27-alpine` để serve các static files HTML, CSS và JavaScript, giúp tiết kiệm tối đa tài nguyên (~8MB RAM).
+- Kích thước Docker image hoàn thiện: Dưới 25MB.
 
-### 3.3. Production Docker Compose Architecture
+### 3.4. Production Docker Compose Architecture
 
-File cấu hình `docker-compose.prod.yml` quản lý 3 service liên kết chặt chẽ:
-- `devpulse-gateway`: Đóng vai trò reverse proxy, serve static files cho frontend và forward requests đến backend API.
-- `devpulse-backend`: Service backend xử lý logic nghiệp vụ, scheduler kiểm tra mục tiêu và kết nối database.
-- `devpulse-database`: MongoDB container gắn kết với Docker volume bền vững trên ổ cứng VPS.
+File cấu hình `docker-compose.prod.yml` quản lý 4 service liên kết chặt chẽ:
+- `devpulse-gateway`: Edge Reverse Proxy gắn kết cấu hình `deploy/nginx/gateway.conf` và SSL certificates.
+- `devpulse-frontend`: Phục vụ giao diện React 18 SPA.
+- `devpulse-backend`: Service backend Node.js 20 Express xử lý logic nghiệp vụ, scheduler ping engine và kết nối database.
+- `devpulse-database`: MongoDB container gắn kết với Docker volume bền vững trên ổ cứng VPS kèm cấu hình `--wiredTigerCacheSizeGB 0.25`.
 
-Mạng nội bộ Docker network giữa các container được cô lập hoàn toàn. Chỉ duy nhất cổng mạng của service reverse proxy là port 80 và 443 được public ra internet.
+Mạng nội bộ Docker network giữa các container được cô lập hoàn toàn (`devpulse-network`). Chỉ duy nhất cổng mạng của service reverse proxy là port 80 và 443 được public ra ngoài Internet.
 
 ---
 
@@ -65,44 +73,48 @@ Mạng nội bộ Docker network giữa các container được cô lập hoàn 
 
 ---
 
-## 5. Continuous Integration and Continuous Deployment Pipeline
+## 5. Continuous Integration and Continuous Deployment Pipelines
+
+Kiến trúc CI/CD được phân tách thành hai workflow hoàn toàn độc lập nhằm đảm bảo an toàn bí mật hạ tầng (Least Privilege) và tối ưu thời gian phát hành:
 
 ```mermaid
-graph TD
-    Developer[Developer Push] -->|Merge to main| GitHubActions[GitHub Actions Runner]
-    
-    subgraph CI Phase
-        GitHubActions --> RunLint[Lint and Type Check]
-        RunLint --> RunTests[Run Unit Tests]
-        RunTests --> BuildImages[Build Multi-stage Images]
-        BuildImages --> PushRegistry[Push to Docker Hub]
+flowchart TD
+    subgraph CI_Pipeline ["CI Pipeline (.github/workflows/ci.yml) - Mọi Push & PR"]
+        direction TB
+        A[Git Push / PR] --> B[Backend Quality Gate: type-check + 59 tests]
+        A --> C[Frontend Quality Gate: type-check + 59 tests + vite build]
+        B --> D{Quality Passed?}
+        C --> D
     end
 
-    subgraph CD Phase
-        PushRegistry --> SSHConnect[SSH to Linux VPS]
-        SSHConnect --> PullImages[docker compose pull]
-        PullImages --> RollingRestart[docker compose up -d]
-        RollingRestart --> PruneOldImages[docker image prune -f]
+    subgraph CD_Pipeline ["CD Pipeline (.github/workflows/cd.yml) - Chỉ khi Push vào main"]
+        direction TB
+        D -- "Code merged to main" --> E[Build Docker Images: Backend & Frontend]
+        E --> F[Push Images to Docker Hub with tags: latest & sha]
+        F --> G[SCP: Sync docker-compose.prod.yml & gateway.conf to VPS]
+        G --> H[SSH: docker compose pull && up -d --remove-orphans]
+        H --> I[Docker prune old dangling layers]
+        I --> J[Probe /api/health endpoint: Zero Downtime Verified]
     end
-
-    RollingRestart --> ProductionLive[Production Updated]
 ```
 
-### 5.1. Continuous Integration Workflow
-Kích hoạt tự động khi có event git push hoặc merge pull request vào branch main:
-- Chạy linter với `eslint` và type-check với lệnh `tsc --noEmit`.
-- Thực thi toàn bộ unit tests tự động.
-- Đăng nhập vào Docker Hub qua credentials lưu an toàn trong GitHub Secrets.
-- Build Docker images, gắn tag commit hash và tag latest.
-- Push Docker images lên Docker Hub registry.
+### 5.1. Continuous Integration Workflow (`ci.yml`)
+Kích hoạt tự động khi có commit đẩy lên branch `main`, `develop` hoặc khi mở Pull Request vào `main`:
+- **Backend Quality Gate:** Kiểm tra type-checking với `tsc --noEmit`, thực thi toàn bộ 59 unit & integration tests trên runner Ubuntu cách ly.
+- **Frontend Quality Gate:** Kiểm tra type-checking với `tsc --noEmit`, chạy toàn bộ 59 component/hook tests, và xác thực đóng gói bundle production với Vite (`npm run build`).
+- **An toàn bảo mật:** Workflow CI tuyệt đối không chứa quyền truy cập vào SSH Key hay bí mật hạ tầng của server production.
 
-### 5.2. Continuous Deployment Workflow
-Kích hoạt tự động ngay sau khi CI phase hoàn tất thành công:
-- Thiết lập kết nối SSH vào Linux VPS qua SSH Private Key lưu trong GitHub Secrets.
-- Di chuyển vào thư mục dự án trên VPS.
-- Thực thi kéo các images phiên bản mới nhất: `docker compose pull`.
-- Khởi động lại các container có thay đổi image bằng lệnh: `docker compose up -d --remove-orphans`. Quá trình này không làm ảnh hưởng đến volume dữ liệu của database.
-- Thực thi lệnh dọn dẹp các image cũ không còn sử dụng để giải phóng dung lượng ổ cứng: `docker image prune -f`.
+### 5.2. Continuous Deployment Workflow (`cd.yml`)
+Kích hoạt tự động khi code đã được merge thành công vào nhánh `main`:
+- **Kiểm tra Quality Gate lần cuối:** Xác thực code sạch trước khi đóng gói.
+- **Build & Push Docker Images:** Sử dụng Docker Buildx trên GitHub runner (4 vCPU / 16GB RAM) để build multi-stage images và đẩy lên Docker Hub (`dorayakiiiiz/devpulse-backend` và `dorayakiiiiz/devpulse-frontend`). Server VPS hoàn toàn không tốn CPU/RAM để build code.
+- **SSH Deployment & Rolling Restart:**
+  1. Tự động đồng bộ các file cấu hình `docker-compose.prod.yml` và `deploy/nginx/gateway.conf` sang thư mục `~/devpulse` trên VPS thông qua SCP Action.
+  2. Kết nối SSH vào VPS qua `appleboy/ssh-action` sử dụng SSH Key ed25519 đã ủy quyền.
+  3. Kéo images mới nhất bằng `docker compose pull` (chỉ mất vài giây do dùng Docker layer caching).
+  4. Tái khởi động containers bằng `docker compose up -d --remove-orphans` mà không làm gián đoạn database volume.
+  5. Xóa các layer image mồ côi bằng `docker image prune -f` để bảo vệ dung lượng ổ cứng SSD.
+  6. Kiểm tra trực tiếp endpoint `/api/health` để xác thực hệ thống online 100%.
 
 ---
 
