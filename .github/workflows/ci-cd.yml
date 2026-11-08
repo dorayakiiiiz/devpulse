@@ -43,6 +43,7 @@ jobs:
         working-directory: backend
         env:
           NODE_ENV: test
+          MONGODB_URI: mongodb://localhost:27017/devpulse_test
           JWT_SECRET: devpulse_test_jwt_secret_key_super_secure_32_chars
           JWT_EXPIRES_IN: 15m
           JWT_REFRESH_SECRET: devpulse_test_jwt_refresh_secret_key_super_secure_32_chars
@@ -158,13 +159,21 @@ jobs:
 
       - name: Execute Remote Deployment via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          envs: DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
           script: |
+            set -e
             cd ~/devpulse
+
+            # Authenticate to Docker Hub on VPS to pull private images and bypass 429 rate limits
+            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
 
             # Pull latest pre-built container images from Docker Hub
             docker compose -f docker-compose.prod.yml pull
@@ -179,6 +188,9 @@ jobs:
             echo "[CD] Verifying service health..."
             sleep 10
             docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-            curl -f http://localhost/api/health || (echo "[CD Error] Gateway / Backend health probe failed!" && exit 1)
+            if ! curl -f http://localhost/api/health; then
+              echo "[CD Error] Gateway / Backend health probe failed!"
+              exit 1
+            fi
             echo "[CD] DevPulse production deployment succeeded!"
 

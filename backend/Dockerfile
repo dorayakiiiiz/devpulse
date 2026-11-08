@@ -45,7 +45,7 @@ EXPOSE 5000
 
 # Docker healthcheck querying backend health endpoint
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:5000/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:5000/api/health || exit 1
 
 # Start backend server
 CMD ["node", "dist/server.js"]
