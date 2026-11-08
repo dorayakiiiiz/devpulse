@@ -143,7 +143,7 @@ export interface MonitorMetricDto {
   id: string;
   monitorId: string;
   timestamp: string;
-  statusCode: number;
+  statusCode: number; // Mã HTTP chuẩn (200..599). Với lỗi network/gateway: 502 (DNS ENOTFOUND / ECONNREFUSED), 504 (ETIMEDOUT), 526 (SSL/TLS)
   latency: number;
   isUp: boolean;
   error: string | null;
@@ -237,6 +237,11 @@ export interface PublicMonitorStatus {
   status: MonitorStatus;
   uptimePercentage24h: number;
   lastCheckedAt: string | null;
+  recentPings: Array<{
+    isUp: boolean;
+    latency: number;
+    timestamp: string;
+  }>;
 }
 
 export interface PublicIncidentItem {

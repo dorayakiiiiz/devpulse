@@ -6,6 +6,11 @@ export interface PublicMonitorStatus {
   status: MonitorStatus;
   uptimePercentage24h: number;
   lastCheckedAt: string | null;
+  recentPings: Array<{
+    isUp: boolean;
+    latency: number;
+    timestamp: string;
+  }>;
 }
 
 export interface PublicIncidentItem {
@@ -25,4 +30,3 @@ export interface PublicStatusPageResponse {
   recentIncidents: PublicIncidentItem[];
   cachedAt: string;
 }
-

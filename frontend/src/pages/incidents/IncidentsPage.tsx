@@ -125,7 +125,9 @@ export const IncidentsPage: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <Badge status={selectedIncident.status} />
                     <span className="font-mono text-xs font-bold text-zinc-700 dark:text-slate-300">
-                      HTTP {selectedIncident.errorDetails.statusCode}
+                      {selectedIncident.errorDetails.statusCode > 0
+                        ? `HTTP ${selectedIncident.errorDetails.statusCode}`
+                        : selectedIncident.errorDetails.errorMessage}
                     </span>
                   </div>
                   <h2 className="mt-4 text-2xl font-black">
@@ -267,7 +269,7 @@ export const IncidentsPage: React.FC = () => {
                       {selectedIncident.errorDetails.errorMessage}
                     </span>
                   </div>
-                  {selectedIncident.errorDetails?.responseHeaders &&
+                  {selectedIncident.errorDetails.responseHeaders &&
                     Object.keys(selectedIncident.errorDetails.responseHeaders).length > 0 && (
                       <div className="mt-3 border-t border-zinc-800 pt-3">
                         <div className="text-[10px] uppercase tracking-wider text-zinc-500">
@@ -282,7 +284,7 @@ export const IncidentsPage: React.FC = () => {
                         )}
                       </div>
                     )}
-                  {selectedIncident.errorDetails?.responseBody && (
+                  {selectedIncident.errorDetails.responseBody && (
                     <div className="mt-3 border-t border-zinc-800 pt-3">
                       <div className="text-[10px] uppercase tracking-wider text-zinc-500">
                         Response Body

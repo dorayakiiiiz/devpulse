@@ -12,6 +12,11 @@ export interface PublicMonitorStatus {
   status: MonitorStatus;
   uptimePercentage24h: number;
   lastCheckedAt: string | null;
+  recentPings: Array<{
+    isUp: boolean;
+    latency: number;
+    timestamp: string;
+  }>;
 }
 
 export interface PublicIncidentItem {
@@ -74,9 +79,14 @@ export class StatusPageService {
     const activeMonitors = await monitorRepository.findActiveByUser(userId);
     const monitorIds = activeMonitors.map((m) => m._id);
 
-    const [uptimeMap, recentIncidents] = await Promise.all([
+    const [uptimeMap, recentIncidents, recentPingsList] = await Promise.all([
       pingMetricRepository.calculateUptime24h(monitorIds),
       incidentRepository.findRecentForStatusPage(monitorIds, 5),
+      Promise.all(
+        activeMonitors.map((m) =>
+          pingMetricRepository.findRecentByMonitor(m._id.toString(), 28)
+        )
+      ),
     ]);
 
     // Calculate overall system operational status
@@ -90,13 +100,24 @@ export class StatusPageService {
       }
     }
 
-    const publicMonitors: PublicMonitorStatus[] = activeMonitors.map((monitor) => ({
-      name: monitor.name,
-      url: monitor.url,
-      status: monitor.status,
-      uptimePercentage24h: uptimeMap.get(monitor._id.toString()) ?? 100,
-      lastCheckedAt: monitor.lastCheckedAt ? monitor.lastCheckedAt.toISOString() : null,
-    }));
+    const publicMonitors: PublicMonitorStatus[] = activeMonitors.map((monitor, idx) => {
+      const pings = recentPingsList[idx] || [];
+      // Chronological order (oldest to newest)
+      const recentPings = [...pings].reverse().map((p) => ({
+        isUp: p.isUp,
+        latency: p.latency,
+        timestamp: p.timestamp.toISOString(),
+      }));
+
+      return {
+        name: monitor.name,
+        url: monitor.url,
+        status: monitor.status,
+        uptimePercentage24h: uptimeMap.get(monitor._id.toString()) ?? 100,
+        lastCheckedAt: monitor.lastCheckedAt ? monitor.lastCheckedAt.toISOString() : null,
+        recentPings,
+      };
+    });
 
     const publicIncidents: PublicIncidentItem[] = recentIncidents.map((incident) => {
       const populatedMonitor = incident.monitorId as IMonitor;

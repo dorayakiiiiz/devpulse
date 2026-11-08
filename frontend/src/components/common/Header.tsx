@@ -30,7 +30,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
   const workspaceName = user?.name || 'Workspace';
 
   return (
-    <header className="sticky top-0 z-20 flex h-18 h-[72px] items-center justify-between border-b-2 border-zinc-950 bg-cream px-5 backdrop-blur dark:border-[#737c91] dark:bg-retro-night/95 md:px-8 lg:px-10">
+    <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b-2 border-zinc-950 bg-cream px-5 backdrop-blur dark:border-[#737c91] dark:bg-retro-night/95 md:px-8 lg:px-10">
       <div className="flex items-center gap-3 lg:hidden">
         {onOpenMobileMenu && (
           <button
@@ -53,7 +53,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
       </div>
 
       <div className="flex items-center gap-3">
-        <div className="hidden items-center gap-2 rounded-md border border-zinc-950 bg-white px-3 py-2 text-xs font-bold dark:border-[#737c91] dark:bg-retro-panel sm:flex">
+        <div className="hidden h-[38px] items-center gap-2 rounded-md border-2 border-zinc-950 bg-white px-3 text-xs font-black text-zinc-950 shadow-[2px_2px_0_#18181b] dark:border-[#737c91] dark:bg-retro-panel dark:text-[#f3eadc] dark:shadow-[2px_2px_0_#090b10] sm:flex">
           <span
             className={`size-2 rounded-full ${
               isConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'
@@ -67,7 +67,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenMobileMenu }) => {
         <button
           type="button"
           onClick={() => navigate('/monitors')}
-          className="flex items-center gap-2 rounded-md border-2 border-zinc-950 bg-yellow-300 px-3.5 py-2 text-xs font-black text-zinc-950 shadow-[3px_3px_0_#18181b] transition-transform hover:-translate-y-0.5 active:translate-y-0 dark:border-[#737c91] dark:bg-amber-300 dark:shadow-[3px_3px_0_#090b10]"
+          className="flex h-[38px] items-center gap-2 rounded-md border-2 border-zinc-950 bg-yellow-300 px-3.5 text-xs font-black text-zinc-950 shadow-[2px_2px_0_#18181b] transition-transform hover:-translate-y-0.5 active:translate-y-0 dark:border-[#737c91] dark:bg-amber-300 dark:shadow-[2px_2px_0_#090b10]"
         >
           <Plus className="size-4 stroke-[3]" />
           <span className="hidden sm:inline">New monitor</span>

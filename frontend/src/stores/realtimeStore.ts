@@ -71,7 +71,7 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
           // Show toast notification based on incident status
           if (payload.status === 'ongoing') {
             toast.error(
-              payload.errorMessage || 'Service disruption detected on monitored endpoint.',
+              payload.errorMessage ?? 'Service disruption detected on monitored endpoint.',
               'Incident Alert'
             );
           } else if (payload.status === 'resolved') {

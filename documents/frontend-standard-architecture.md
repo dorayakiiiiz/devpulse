@@ -1174,6 +1174,16 @@ Khi phát triển các màn hình nghiệp vụ, logic fetch dữ liệu, mutati
 - Mutation giải quyết thủ công `resolveIncident(id)` và tái phân tích `reanalyzeIncident(id)`.
 - Tự động nhận diện sự kiện `INCIDENT_ALERT` thời gian thực từ SSE để cập nhật timeline.
 
+### 9.4. Hook Quản trị Hạ tầng & Engine (`src/hooks/useAdmin.ts`):
+- Quản lý dữ liệu tổng quan admin (`overview`), trạng thái ping engine (`engineStatus`), và chỉ số sức khỏe container (`health`).
+- Tự động thăm dò định kỳ (15s polling) để duy trì thông số buffer và dung lượng RAM Node.js cập nhật trực tiếp.
+- Thao tác xả bộ đệm cưỡng bức `flushBuffer()` gọi `POST /api/admin/ping-engine/flush`, cập nhật tức thời UI và thông báo toast.
+
+### 9.5. Hook Trang Trạng thái Công khai (`src/hooks/usePublicStatus.ts`):
+- Truy xuất thông tin tổng quan hệ thống, danh sách dịch vụ và sự cố gần nhất theo `slug` định tuyến.
+- Cơ chế tự động thăm dò 30s (`setInterval`) đồng bộ tuyệt đối với TTL của bộ đệm `node-cache` phía backend.
+- Phân tầng lỗi chặt chẽ, hỗ trợ hiển thị màn hình 404 phong cách Retro khi không tìm thấy slug.
+
 ---
 
 ## 10. Data Visualization & Realtime Latency Charts

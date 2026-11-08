@@ -16,6 +16,8 @@ interface BadgeProps {
 }
 
 const statusDisplayLabels: Record<string, string> = {
+  up: 'Operational',
+  operational: 'Operational',
   all_operational: 'All operational',
   partial_outage: 'Partial outage',
   major_outage: 'Major outage',

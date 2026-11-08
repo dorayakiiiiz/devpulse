@@ -75,25 +75,30 @@ export function useMonitors() {
     };
   }, [handleRealtimePing, handleRealtimeIncident, subscribePing, subscribeIncident]);
 
+  const hasActiveCooldown = Object.values(cooldowns).some((seconds) => seconds > 0);
+
   // Interval timer ticking down active cooldown counters every second until reaching zero
   useEffect(() => {
-    const hasActiveCooldown = Object.values(cooldowns).some((seconds) => seconds > 0);
     if (!hasActiveCooldown) return;
 
     const intervalTimer = setInterval(() => {
       setCooldowns((prev) => {
+        let changed = false;
         const next: Record<string, number> = {};
         for (const [id, count] of Object.entries(prev)) {
           if (count > 1) {
             next[id] = count - 1;
+            changed = true;
+          } else if (count === 1) {
+            changed = true;
           }
         }
-        return next;
+        return changed ? next : prev;
       });
     }, 1000);
 
     return () => clearInterval(intervalTimer);
-  }, [cooldowns]);
+  }, [hasActiveCooldown]);
 
   const createMonitor = useCallback(
     async (payload: CreateMonitorPayload): Promise<MonitorResponseDto> => {

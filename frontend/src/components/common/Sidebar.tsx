@@ -72,7 +72,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
   const sidebarContent = (
     <div className="flex h-full flex-col justify-between">
       <div>
-        <div className="flex h-18 h-[72px] shrink-0 items-center justify-between border-b-2 border-zinc-950 px-6 dark:border-[#737c91]">
+        <div className="flex h-[72px] shrink-0 items-center justify-between border-b-2 border-zinc-950 px-6 dark:border-[#737c91]">
           <Logo />
           {onClose && (
             <button
@@ -154,7 +154,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
                 {accountName}
               </div>
               <div className="truncate text-xs text-zinc-500 dark:text-slate-400">
-                {'Account settings'}
+                Account settings
               </div>
             </div>
           </div>

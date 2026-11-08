@@ -175,7 +175,7 @@ export const MonitorDetailPage: React.FC = () => {
             </div>
           </div>
           <svg
-            className="mt-6 h-56 w-full overflow-visible"
+            className="mt-6 h-44 w-full overflow-visible"
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
           >
@@ -216,8 +216,8 @@ export const MonitorDetailPage: React.FC = () => {
           </div>
         </section>
 
-        {/* SSL certificate card */}
-        <section className="rounded-lg border-2 border-zinc-950 bg-[#d7dda7] p-5 text-zinc-950 dark:border-[#718d84] dark:bg-[#304b45] dark:text-[#f3eadc]">
+        {/* SSL certificate summary */}
+        <section className="flex flex-col justify-between rounded-lg border-2 border-zinc-950 bg-[#d7dda7] p-5 text-zinc-950 dark:border-[#718d84] dark:bg-[#304b45] dark:text-[#f3eadc]">
           <div className="flex items-start justify-between">
             <div>
               <h2 className="font-black">SSL certificate</h2>
@@ -228,7 +228,7 @@ export const MonitorDetailPage: React.FC = () => {
             <Shield className="size-5" />
           </div>
           {!monitor.sslInfo ? (
-            <div className="mt-8 rounded-md border-2 border-dashed border-zinc-700 p-5 text-center">
+            <div className="my-auto rounded-md border-2 border-dashed border-zinc-700 p-5 text-center">
               <div className="font-black">
                 {monitor.url.startsWith('http://') ? 'No SSL' : 'Scan pending'}
               </div>
@@ -239,32 +239,33 @@ export const MonitorDetailPage: React.FC = () => {
               </p>
             </div>
           ) : (
-            <div className="mt-7 space-y-5">
-              <div>
+            <div className="mt-4 flex flex-1 flex-col justify-between">
+              <div className="border-t border-zinc-950/15 pt-3 dark:border-[#718d84]/30">
                 <div className="text-xs text-zinc-700 dark:text-slate-300">
                   Issuer
                 </div>
-                <div className="mt-1 font-black">{monitor.sslInfo.issuer}</div>
+                <div className="mt-0.5 font-black">{monitor.sslInfo.issuer}</div>
               </div>
-              <div>
+              <div className="border-t border-zinc-950/15 pt-3 dark:border-[#718d84]/30">
                 <div className="text-xs text-zinc-700 dark:text-slate-300">
                   Valid to
                 </div>
-                <div className="mt-1 font-black">{formatDate(monitor.sslInfo.validTo)}</div>
+                <div className="mt-0.5 font-black">{formatDate(monitor.sslInfo.validTo)}</div>
               </div>
-              <div>
+              <div className="border-t border-zinc-950/15 pt-3 dark:border-[#718d84]/30">
                 <div className="mb-2 flex justify-between text-xs">
                   <span>Time remaining</span>
                   <span className="font-black">{monitor.sslInfo.daysRemaining} days</span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-zinc-950/20">
                   <div
-                    className={`h-full rounded-full ${monitor.sslInfo.daysRemaining < 7
-                      ? 'w-[8%] bg-red-600'
-                      : monitor.sslInfo.daysRemaining < 30
-                        ? 'w-[32%] bg-amber-600'
-                        : 'w-[72%] bg-emerald-700'
-                      }`}
+                    className={`h-full rounded-full ${
+                      monitor.sslInfo.daysRemaining < 7
+                        ? 'w-[8%] bg-red-600'
+                        : monitor.sslInfo.daysRemaining < 30
+                          ? 'w-[32%] bg-amber-600'
+                          : 'w-[72%] bg-emerald-700'
+                    }`}
                   />
                 </div>
               </div>
@@ -278,12 +279,12 @@ export const MonitorDetailPage: React.FC = () => {
         <div className="border-b-2 border-zinc-950 p-5 dark:border-[#737c91]">
           <h2 className="font-black">Recent pings</h2>
           <p className="mt-1 text-xs text-zinc-500 dark:text-slate-400">
-            Latest checks from the ping engine
+            Last 30 checks recorded by engine
           </p>
         </div>
-        <div className="overflow-x-auto">
+        <div className="retro-scrollbar max-h-80 overflow-y-auto overflow-x-auto">
           <table className="w-full min-w-[680px] text-left">
-            <thead className="bg-zinc-100 text-[10px] uppercase tracking-wider text-zinc-500 dark:bg-slate-900 dark:text-slate-400">
+            <thead className="sticky top-0 z-10 bg-zinc-100 text-[10px] uppercase tracking-wider text-zinc-500 dark:bg-slate-900 dark:text-slate-400">
               <tr>
                 <th className="p-4">Timestamp</th>
                 <th className="p-4">Status</th>
@@ -315,13 +316,15 @@ export const MonitorDetailPage: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                metrics.slice(0, 10).map((metric) => (
+                metrics.map((metric) => (
                   <tr key={metric.id}>
                     <td className="p-4 font-mono text-xs">{formatRelativeTime(metric.timestamp)}</td>
                     <td className="p-4">
                       <Badge status={metric.isUp ? 'up' : 'down'} />
                     </td>
-                    <td className="p-4 text-sm font-black">{metric.statusCode}</td>
+                    <td className="p-4 text-sm font-black">
+                      {metric.statusCode > 0 ? metric.statusCode : (metric.error ?? '—')}
+                    </td>
                     <td className="p-4 text-sm font-mono">{metric.latency} ms</td>
                     <td className="p-4 text-xs text-zinc-500 dark:text-slate-400">
                       {metric.error ?? '—'}
@@ -334,7 +337,7 @@ export const MonitorDetailPage: React.FC = () => {
         </div>
       </section>
 
-      {/* Incident history grid */}
+      {/* Incident history grid with click-to-investigate navigation */}
       <section className="mt-6">
         <h2 className="text-xl font-black">Incident history</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -342,11 +345,14 @@ export const MonitorDetailPage: React.FC = () => {
             incidents.map((item) => (
               <article
                 key={item.id}
-                className="rounded-lg border-2 border-zinc-950 bg-retro-lilac p-4 dark:border-[#737c91] dark:bg-[#58486e]"
+                onClick={() => navigate(`/incidents?id=${item.id}`)}
+                className="cursor-pointer rounded-lg border-2 border-zinc-950 bg-retro-lilac p-4 transition-all hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[3px_3px_0_#18181b] dark:border-[#737c91] dark:bg-[#58486e]"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="font-black">
-                    HTTP {item.errorDetails.statusCode} interruption
+                    {item.errorDetails.statusCode > 0
+                      ? `HTTP ${item.errorDetails.statusCode} interruption`
+                      : `${item.errorDetails.errorMessage} interruption`}
                   </div>
                   <Badge status={item.status} />
                 </div>

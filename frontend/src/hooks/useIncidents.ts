@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { incidentService } from '../services/incidentService';
 import { IncidentResponseDto, IncidentStatus } from '../types/incident';
 import { getApiErrorMessage } from '../lib/apiError';
@@ -8,6 +9,9 @@ import { SseIncidentAlertEvent } from '../types/api';
 
 // Central custom hook managing incident event timelines, active item selection, and AI post-mortem diagnosis
 export function useIncidents() {
+  const [searchParams] = useSearchParams();
+  const queryIncidentId = searchParams.get('id');
+
   const [incidents, setIncidents] = useState<IncidentResponseDto[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<IncidentStatus>('ongoing');
@@ -30,6 +34,16 @@ export function useIncidents() {
   useEffect(() => {
     fetchIncidents();
   }, [fetchIncidents]);
+
+  // Synchronize active incident selection with URL search parameters (e.g. ?id=...)
+  useEffect(() => {
+    if (!queryIncidentId || incidents.length === 0) return;
+    const target = incidents.find((item) => item.id === queryIncidentId);
+    if (target) {
+      setFilter(target.status);
+      setSelectedId(target.id);
+    }
+  }, [queryIncidentId, incidents]);
 
   // Handle incoming realtime incident updates dispatched via Server-Sent Events
   const handleRealtimeIncident = useCallback(
@@ -136,7 +150,5 @@ export function useIncidents() {
     setSelectedId,
     resolveIncident,
     reanalyzeIncident,
-    fetchIncidents,
   };
 }
-

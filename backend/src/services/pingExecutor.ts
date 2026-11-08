@@ -39,23 +39,42 @@ export class PingExecutor {
     } catch (error: unknown) {
       isUp = false;
       if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          statusCode = 408;
+        // Extract low-level system error code from root error or nested cause in Node.js fetch
+        const cause = 'cause' in error && error.cause instanceof Error ? error.cause : null;
+        const code = (cause && 'code' in cause && typeof cause.code === 'string')
+          ? cause.code
+          : ('code' in error && typeof error.code === 'string')
+            ? error.code
+            : undefined;
+
+        if (error.name === 'AbortError' || code === 'ETIMEDOUT') {
+          statusCode = 504;
           errorMessage = 'ETIMEDOUT';
-        } else if ('code' in error && typeof error.code === 'string') {
-          errorMessage = error.code;
+        } else if (code === 'ENOTFOUND') {
+          statusCode = 502;
+          errorMessage = 'ENOTFOUND';
+        } else if (code === 'ECONNREFUSED') {
+          statusCode = 502;
+          errorMessage = 'ECONNREFUSED';
+        } else if (code === 'ECONNRESET') {
+          statusCode = 502;
+          errorMessage = 'ECONNRESET';
+        } else if (code?.startsWith('CERT_') || code?.includes('SSL') || code?.includes('TLS')) {
+          statusCode = 526;
+          errorMessage = code;
         } else {
-          errorMessage = error.message;
+          statusCode = 502;
+          errorMessage = code || error.message || 'Connection failure';
         }
       } else {
+        statusCode = 502;
         errorMessage = 'Network connection failure';
       }
     } finally {
       clearTimeout(timeout);
     }
 
-    // Set latency to 0 for unestablished connections (DNS failure or connection refused) per system spec
-    const latency = statusCode === 0 ? 0 : Math.max(1, Date.now() - startTime);
+    const latency = Math.max(1, Date.now() - startTime);
 
     return {
       statusCode,
