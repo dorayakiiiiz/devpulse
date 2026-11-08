@@ -1,0 +1,13 @@
+import { defineConfig } from 'vitest/config';
+
+// Vitest configuration for Backend Node.js service
+export default defineConfig({
+  test: {
+    globals: true,
+    environment: 'node',
+    setupFiles: ['./tests/setup.ts'],
+    testTimeout: 30000,
+    hookTimeout: 60000,
+    include: ['tests/**/*.test.ts'],
+  },
+});
