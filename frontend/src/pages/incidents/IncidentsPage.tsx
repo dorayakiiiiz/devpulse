@@ -41,9 +41,9 @@ export const IncidentsPage: React.FC = () => {
         </p>
       </div>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-[.8fr_1.4fr]">
-        {/* Left column: Incident timeline list */}
-        <section className="flex h-full min-h-[452px] flex-col overflow-hidden rounded-lg border-2 border-zinc-950 bg-white dark:border-[#737c91] dark:bg-retro-panel">
+      <div className="mt-8 grid items-stretch gap-6 xl:grid-cols-[.8fr_1.4fr]">
+        {/* Left column: Incident timeline list with capped height and retro scrollbar */}
+        <section className="flex flex-col self-stretch overflow-hidden rounded-lg border-2 border-zinc-950 bg-white shadow-retro dark:border-[#737c91] dark:bg-retro-panel max-h-[460px] xl:max-h-[460px]">
           <div className="shrink-0 border-b-2 border-zinc-950 p-3 dark:border-[#737c91]">
             <div className="px-1 text-xs font-black uppercase tracking-wider">
               Incident timeline

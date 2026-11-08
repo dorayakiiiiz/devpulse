@@ -54,7 +54,7 @@ sequenceDiagram
 
     PE->>RS: eventBus.emitPingCompleted(payload)
     RS->>ZS: res.write("event: MONITOR_PING\ndata: {...}\n\n")
-    ZS->>ZS: Parse JSON & cập nhật lastPingEvent
+    ZS->>ZS: Parse JSON & fan-out sự kiện tới subscribers
     ZS->>CH: Duyệt pingSubscribers.forEach(cb => cb(event))
     Note over CH: Callback nhận event, kiểm tra ID & deduplicate
     CH->>CH: setMetrics([...prev, newMetric]) & setMonitor(...)
@@ -166,8 +166,6 @@ const incidentSubscribers = new Set<IncidentSubscriber>();
 
 export const useRealtimeStore = create<RealtimeState>((set) => ({
   isConnected: false,
-  lastPingEvent: null,
-  lastIncidentEvent: null,
 
   connect: (accessToken: string) => {
     // IDEMPOTENCY CHECK: Nếu socket đang mở và token không đổi, tuyệt đối không tạo lại
@@ -199,7 +197,6 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
         const payload = JSON.parse(event.data) as SseServerEvent;
 
         if (payload.type === 'MONITOR_PING') {
-          set({ lastPingEvent: payload });
           // DUYỆT TẤT CẢ SUBSCRIBERS VỚI CƠ CHẾ BẢO VỆ FAULT ISOLATION
           pingSubscribers.forEach((cb) => {
             try {
@@ -210,9 +207,7 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
             }
           });
         } else if (payload.type === 'INCIDENT_ALERT') {
-          set({ lastIncidentEvent: payload });
-
-          // BẬN TOAST HỆ THỐNG TỨC THÌ BẰNG IMPERATIVE API
+          // BẬT TOAST HỆ THỐNG TỨC THÌ BẰNG IMPERATIVE API
           if (payload.status === 'ongoing') {
             toast.error(
               payload.errorMessage || 'Service disruption detected on monitored endpoint.',
@@ -246,7 +241,7 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       eventSourceInstance = null;
     }
     currentToken = null;
-    set({ isConnected: false, lastPingEvent: null, lastIncidentEvent: null });
+    set({ isConnected: false });
   },
 
   // PATTERN PUB/SUB: Đăng ký nhận sự kiện và trả về hàm hủy (Teardown Cleanup)

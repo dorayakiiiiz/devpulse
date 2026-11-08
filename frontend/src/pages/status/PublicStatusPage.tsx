@@ -112,12 +112,14 @@ export const PublicStatusPage: React.FC = () => {
               Cached {formatRelativeTime(data.cachedAt)}
             </span>
             <ThemeToggle />
-            <Link
-              to={isAuthenticated ? '/' : '/auth'}
-              className="rounded-md border-2 border-zinc-950 bg-white px-3.5 py-2 text-xs font-black text-zinc-950 shadow-retro transition-all hover:translate-x-[1px] hover:translate-y-[1px] dark:border-[#737c91] dark:bg-retro-panel dark:text-[#f3eadc]"
-            >
-              {isAuthenticated ? 'Dashboard' : 'Sign in'}
-            </Link>
+            {isAuthenticated && (
+              <Link
+                to="/"
+                className="rounded-md border-2 border-zinc-950 bg-white px-3.5 py-2 text-xs font-black text-zinc-950 shadow-retro transition-all hover:translate-x-[1px] hover:translate-y-[1px] dark:border-[#737c91] dark:bg-retro-panel dark:text-[#f3eadc]"
+              >
+                Dashboard
+              </Link>
+            )}
           </div>
         </div>
       </header>
@@ -243,7 +245,7 @@ export const PublicStatusPage: React.FC = () => {
                           second: '2-digit',
                         });
                         const tooltip = `${timeStr} • ${ping.latency} ms • ${
-                          ping.isUp ? 'Operational' : 'Probe failed'
+                          ping.isUp ? 'UP' : 'Probe failed'
                         }`;
 
                         return (

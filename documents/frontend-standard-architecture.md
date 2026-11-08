@@ -988,8 +988,6 @@ type IncidentSubscriber = (event: SseIncidentAlertEvent) => void;
 
 interface RealtimeState {
   isConnected: boolean;
-  lastPingEvent: SseMonitorPingEvent | null;
-  lastIncidentEvent: SseIncidentAlertEvent | null;
   connect: (accessToken: string) => void;
   disconnect: () => void;
   subscribePing: (cb: PingSubscriber) => () => void;
@@ -1004,8 +1002,6 @@ const incidentSubscribers = new Set<IncidentSubscriber>();
 // Central Zustand store managing the single background SSE EventSource socket and event fan-out
 export const useRealtimeStore = create<RealtimeState>((set) => ({
   isConnected: false,
-  lastPingEvent: null,
-  lastIncidentEvent: null,
 
   connect: (accessToken: string) => {
     // Avoid re-establishing identical active connection on component re-renders
@@ -1036,7 +1032,6 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
         const payload = JSON.parse(event.data) as SseServerEvent;
 
         if (payload.type === 'MONITOR_PING') {
-          set({ lastPingEvent: payload });
           pingSubscribers.forEach((cb) => {
             try {
               cb(payload);
@@ -1045,7 +1040,6 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
             }
           });
         } else if (payload.type === 'INCIDENT_ALERT') {
-          set({ lastIncidentEvent: payload });
           if (payload.status === 'ongoing') {
             toast.error(
               payload.errorMessage || 'Service disruption detected on monitored endpoint.',
@@ -1081,7 +1075,7 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       eventSourceInstance = null;
     }
     currentToken = null;
-    set({ isConnected: false, lastPingEvent: null, lastIncidentEvent: null });
+    set({ isConnected: false });
   },
 
   subscribePing: (cb: PingSubscriber) => {
@@ -1145,7 +1139,7 @@ useEffect(() => {
    - Trình duyệt sẽ âm thầm tiếp nhận byte để giữ socket mạng luôn mở qua Nginx Reverse Proxy mà hoàn toàn không kích hoạt sự kiện `onmessage`. Khối `try/catch` bổ sung chỉ nhằm bảo vệ ứng dụng khỏi dữ liệu không hợp lệ.
 
 3. **Điều phối Sự kiện Nghiệp vụ Tập trung:**
-   - **Sự kiện `MONITOR_PING`:** Phát sinh khi Ping Engine kiểm tra xong một trang web. Dữ liệu chứa `{ monitorId, statusCode, latency, isUp, timestamp }`. Store cập nhật `lastPingEvent` và fan-out tới các callback `pingSubscribers`.
+   - **Sự kiện `MONITOR_PING`:** Phát sinh khi Ping Engine kiểm tra xong một trang web. Dữ liệu chứa `{ monitorId, statusCode, latency, isUp, timestamp }`. Store fan-out trực tiếp tới các callback `pingSubscribers`.
    - **Sự kiện `INCIDENT_ALERT`:** Phát sinh khi website bị sập hoặc vừa phục hồi. Store tự động kích hoạt thông báo Toast cấp hệ thống (`toast.error` hoặc `toast.success`) mà không cần chờ component UI nào bắt được sự kiện, đồng thời fan-out tới `incidentSubscribers`.
 
 4. **Dọn dẹp Kết nối Khi Unmount & Đăng xuất:**

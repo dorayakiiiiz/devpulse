@@ -186,7 +186,7 @@ export const AdminPage: React.FC = () => {
         </section>
 
         {/* Live Container Health and Resource Meter Section */}
-        <section className="rounded-lg border-2 border-zinc-950 bg-[#d7dda7] p-6 text-zinc-950 dark:border-[#718d84] dark:bg-[#304b45] dark:text-[#f3eadc]">
+        <section className="flex flex-col justify-between rounded-lg border-2 border-zinc-950 bg-[#d7dda7] p-6 text-zinc-950 dark:border-[#718d84] dark:bg-[#304b45] dark:text-[#f3eadc]">
           <div className="flex justify-between items-start">
             <div>
               <h2 className="font-black text-base">Health endpoint</h2>
@@ -203,7 +203,7 @@ export const AdminPage: React.FC = () => {
             />
           </div>
 
-          <div className="mt-7 space-y-5">
+          <div className="mt-7 flex flex-1 flex-col justify-between gap-4">
             <div>
               <div className="mb-2 flex justify-between text-xs">
                 <span className="font-medium text-zinc-700 dark:text-slate-300">MongoDB</span>

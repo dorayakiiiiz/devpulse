@@ -8,8 +8,6 @@ type IncidentSubscriber = (event: SseIncidentAlertEvent) => void;
 
 interface RealtimeState {
   isConnected: boolean;
-  lastPingEvent: SseMonitorPingEvent | null;
-  lastIncidentEvent: SseIncidentAlertEvent | null;
   connect: (accessToken: string) => void;
   disconnect: () => void;
   subscribePing: (cb: PingSubscriber) => () => void;
@@ -24,8 +22,6 @@ const incidentSubscribers = new Set<IncidentSubscriber>();
 // Central Zustand store managing the single background SSE EventSource socket and event fan-out
 export const useRealtimeStore = create<RealtimeState>((set) => ({
   isConnected: false,
-  lastPingEvent: null,
-  lastIncidentEvent: null,
 
   connect: (accessToken: string) => {
     // Avoid re-establishing identical active connection on component re-renders
@@ -57,7 +53,6 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
         const payload = JSON.parse(event.data) as SseServerEvent;
 
         if (payload.type === 'MONITOR_PING') {
-          set({ lastPingEvent: payload });
           // Notify all ping subscribers
           pingSubscribers.forEach((cb) => {
             try {
@@ -67,7 +62,6 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
             }
           });
         } else if (payload.type === 'INCIDENT_ALERT') {
-          set({ lastIncidentEvent: payload });
           // Show toast notification based on incident status
           if (payload.status === 'ongoing') {
             toast.error(
@@ -106,7 +100,7 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       eventSourceInstance = null;
     }
     currentToken = null;
-    set({ isConnected: false, lastPingEvent: null, lastIncidentEvent: null });
+    set({ isConnected: false });
   },
 
   // Allow components to subscribe to ping events

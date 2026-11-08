@@ -16,6 +16,7 @@ import { Logo } from './Logo';
 import { useAuthStore } from '../../stores/authStore';
 import { authService } from '../../services/authService';
 import { toast } from '../../stores/toastStore';
+import { AccountSettingsModal } from '../settings/AccountSettingsModal';
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -27,6 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
   const { user, clearAuth } = useAuthStore();
   const navigate = useNavigate();
   const [linkCopied, setLinkCopied] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const navItems = [
     { to: '/', label: 'Overview', icon: LayoutGrid, exact: true },
@@ -145,7 +147,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
 
       <div className="border-t-2 border-zinc-950 p-4 dark:border-[#737c91]">
         <div className="flex items-center gap-1">
-          <div className="flex min-w-0 flex-1 items-center gap-3 rounded-md p-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (onClose) onClose();
+              setIsSettingsOpen(true);
+            }}
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-md p-2 text-left transition-colors hover:bg-white/70 dark:hover:bg-slate-700"
+          >
             <div className="grid size-9 shrink-0 place-items-center rounded-full bg-yellow-300 text-xs font-black text-zinc-950">
               {initials}
             </div>
@@ -157,7 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
                 Account settings
               </div>
             </div>
-          </div>
+          </button>
 
           <button
             type="button"
@@ -193,6 +202,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => 
           </aside>
         </div>
       )}
+
+      {/* Account Settings Modal */}
+      <AccountSettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
     </>
   );
 };

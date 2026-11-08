@@ -57,6 +57,8 @@ apiClient.interceptors.response.use(
       originalRequest.url?.includes('/auth/logout');
 
     if (error.response.status === 401 && !originalRequest._retry && !isAuthRoute) {
+      originalRequest._retry = true;
+
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({
@@ -71,7 +73,6 @@ apiClient.interceptors.response.use(
         });
       }
 
-      originalRequest._retry = true;
       isRefreshing = true;
 
       try {

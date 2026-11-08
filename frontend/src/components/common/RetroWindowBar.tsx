@@ -2,13 +2,14 @@ import React from 'react';
 
 interface RetroWindowBarProps {
   title: string;
-  tone?: 'sage' | 'coral' | 'blue';
+  tone?: 'sage' | 'coral' | 'blue' | 'lilac';
 }
 
-const toneStyles: Record<'sage' | 'coral' | 'blue', string> = {
+const toneStyles: Record<'sage' | 'coral' | 'blue' | 'lilac', string> = {
   sage: 'bg-[#d9ef9f] dark:bg-[#3f5a4f]',
   coral: 'bg-coral-soft dark:bg-[#663b43]',
   blue: 'bg-retro-blue dark:bg-[#394b67]',
+  lilac: 'bg-retro-lilac dark:bg-[#64557a]',
 };
 
 // Retro mac-style window header bar

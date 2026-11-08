@@ -56,7 +56,14 @@ export const MonitorModal: React.FC<MonitorModalProps> = ({ monitor, onClose, on
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-zinc-950/65 p-4">
+    <div
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-zinc-950/65 p-4"
+    >
       <form
         onSubmit={handleSubmit}
         role="dialog"
