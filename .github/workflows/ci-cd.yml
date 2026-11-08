@@ -177,8 +177,8 @@ jobs:
 
             # Verify container health
             echo "[CD] Verifying service health..."
-            sleep 5
+            sleep 10
             docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-            curl -f http://localhost:5000/api/health || (echo "[CD Error] Backend health probe failed!" && exit 1)
+            curl -f http://localhost/api/health || (echo "[CD Error] Gateway / Backend health probe failed!" && exit 1)
             echo "[CD] DevPulse production deployment succeeded!"
 
