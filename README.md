@@ -182,7 +182,6 @@ git push origin main
 | `JWT_EXPIRES_IN` | Thời gian sống Access Token | `15m` |
 | `JWT_REFRESH_SECRET` | Khóa ký Refresh Token | Chuỗi bí mật tối thiểu 32 ký tự |
 | `JWT_REFRESH_EXPIRES_IN` | Thời gian sống Refresh Token | `7d` |
-| `CORS_ORIGIN` | Danh sách domain được phép gửi request | `http://localhost:5173` |
 
 ### Frontend Environment
 

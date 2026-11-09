@@ -7,11 +7,11 @@ import { env } from '../config/env.js';
 export const REFRESH_COOKIE_NAME = 'refreshToken';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
-// Base cookie configuration options enforcing HttpOnly and strict site isolation
+// Base cookie configuration options enforcing HttpOnly and standard lax isolation
 export const baseCookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
+  sameSite: 'lax' as const,
   path: '/',
 };
 

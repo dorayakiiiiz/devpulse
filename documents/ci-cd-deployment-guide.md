@@ -126,7 +126,7 @@ Trong file [`docker-compose.prod.yml`](../docker-compose.prod.yml), service `dev
 ```yaml
     volumes:
       - ./deploy/nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro
-      - certbot-etc:/etc/letsencrypt:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
       - certbot-var:/var/www/certbot:ro
 ```
 
@@ -135,7 +135,7 @@ Trong file [`docker-compose.prod.yml`](../docker-compose.prod.yml), service `dev
 | Dòng cấu hình Volume | Cơ chế hoạt động | Mục đích sống còn |
 | :--- | :--- | :--- |
 | **`./deploy/nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro`** | **Bind Mount (Ánh xạ file trực tiếp):** Lấy trực tiếp file `gateway.conf` trên ổ cứng VPS (trong thư mục `~/devpulse/deploy/nginx/`) đè vào vị trí cấu hình mặc định `/etc/nginx/conf.d/default.conf` bên trong container với quyền Chỉ đọc (`:ro` - Read Only). | Cho phép chúng ta thay đổi luật định tuyến reverse proxy, thêm header, chỉnh timeout mà **không cần phải build lại Docker image của Gateway**. Khi file trên VPS thay đổi, Nginx chỉ cần reload là ăn cấu hình mới ngay lập tức. |
-| **`certbot-etc:/etc/letsencrypt:ro`** | **Named Volume (Ổ đĩa chia sẻ chứng chỉ SSL):** Ánh xạ thư mục chứa chứng chỉ SSL do Certbot tạo ra (`/etc/letsencrypt`) vào bên trong container Gateway tại `/etc/letsencrypt` với quyền `:ro`. | Nginx cần đọc 2 file `fullchain.pem` (chứng chỉ công khai) và `privkey.pem` (khóa bí mật) để kích hoạt giao thức bảo mật HTTPS cổng 443. Do Certbot chạy trên host VPS còn Nginx chạy trong container, volume này đóng vai trò "cây cầu" chia sẻ file chứng chỉ giữa VPS và Container. |
+| **`/etc/letsencrypt:/etc/letsencrypt:ro`** | **Bind Mount (Ánh xạ thư mục chứng chỉ máy chủ):** Ánh xạ trực tiếp thư mục chứng chỉ `/etc/letsencrypt` do Certbot sinh ra trên ổ cứng VPS vào bên trong container Gateway tại `/etc/letsencrypt` với quyền `:ro`. | Nginx cần đọc 2 file `fullchain.pem` (chứng chỉ công khai) và `privkey.pem` (khóa bí mật) để kích hoạt giao thức bảo mật HTTPS cổng 443. Do Certbot chạy trực tiếp trên VPS ghi chứng chỉ vào `/etc/letsencrypt` của máy chủ, bắt buộc phải dùng Bind Mount để Nginx đọc trực tiếp, tránh lỗi thiếu file của Named Volume. |
 | **`certbot-var:/var/www/certbot:ro`** | **Named Volume (Ổ đĩa chia sẻ thử thách ACME):** Ánh xạ thư mục webroot xác thực chứng chỉ vào container tại `/var/www/certbot`. | Khi xin cấp SSL, Certbot ghi file token xác thực vào đây. Container Nginx đọc từ thư mục này và phát ra Internet cho Let's Encrypt kiểm tra mà **không cần phải tắt Nginx (Zero Downtime)**. |
 
 ---
@@ -468,7 +468,7 @@ services:
       - "443:443"
     volumes:
       - ./deploy/nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro
-      - certbot-etc:/etc/letsencrypt:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
       - certbot-var:/var/www/certbot:ro
     depends_on:
       devpulse-backend:
@@ -555,7 +555,6 @@ networks:
 
 volumes:
   mongodb_prod_data:
-  certbot-etc:
   certbot-var:
 ```
 
@@ -563,6 +562,40 @@ volumes:
 > - `command: ["--wiredTigerCacheSizeGB", "0.25"]`: Bắt buộc cấu hình nhằm giới hạn bộ đệm WiredTiger nội bộ của MongoDB chỉ dùng tối đa 256MB RAM, ngăn chặn MongoDB tự động chiếm dụng 50% RAM vật lý của hệ thống.
 > - `condition: service_healthy`: Đảm bảo thứ tự khởi động chuẩn xác: MongoDB kết nối thành công $\rightarrow$ Backend khởi động & pass healthcheck $\rightarrow$ Gateway mới mở cửa đón lưu lượng bên ngoài.
 > - Cấu hình `networks` và `volumes` không khai báo driver rác vì mặc định hệ thống đã là `bridge` và `local`.
+
+---
+
+### 4.1. Phân Tích Cơ Chế Ánh Xạ Volume Giữa VPS và Container (Volume Mapping Deep-Dive)
+
+Để tránh nhầm lẫn giữa **Thư mục máy chủ VPS (Host Path)** và **Thư mục trong Container (Container Path)**, bảng dưới đây giải thích chính xác nguồn gốc dữ liệu, cơ chế ánh xạ và luồng trao đổi dữ liệu của từng volume trong hệ thống:
+
+| Tên Volume trong Compose | Loại Mount | Đường dẫn vật lý trên VPS (Host) | Đường dẫn bên trong Container | Ai ghi dữ liệu vào? | Ai đọc dữ liệu ra? | Vì sao phải thiết kế như vậy? |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`./deploy/nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro`** | **Host Bind Mount** | `~/devpulse/deploy/nginx/gateway.conf` | `/etc/nginx/conf.d/default.conf` | GitHub Actions (qua action SCP) | Tiến trình Nginx Gateway | Khi cần cập nhật luật reverse proxy, thêm header, hay bật HTTPS, CI/CD chỉ cần copy file đè lên VPS và reload Nginx mà không phải build lại image Nginx từ đầu. |
+| **`/etc/letsencrypt:/etc/letsencrypt:ro`** | **Host Bind Mount** | `/etc/letsencrypt/` (Thư mục hệ thống của VPS) | `/etc/letsencrypt/` (Bên trong `devpulse-gateway`) | Công cụ Certbot chạy trên VPS Linux (`sudo certbot`) | Tiến trình Nginx Gateway | **Điểm mấu chốt:** Certbot được cài trực tiếp trên máy chủ qua `apt`, nên khi xin cấp chứng chỉ thành công, Certbot ghi 2 file `fullchain.pem` và `privkey.pem` trực tiếp vào ổ cứng VPS tại `/etc/letsencrypt/live/...`. Do đó, Nginx container bắt buộc phải dùng **Host Bind Mount** (`/etc/letsencrypt:...`) để nhìn thấy dữ liệu thật. Nếu dùng Named Volume (`certbot-etc:...`), Nginx sẽ đọc trúng thư mục rỗng của Docker và báo lỗi `No such file or directory`. |
+| **`certbot-var:/var/www/certbot:ro`** | **Docker Named Volume** | `/var/lib/docker/volumes/devpulse_certbot-var/_data` | `/var/www/certbot` (Bên trong `devpulse-gateway`) | Công cụ Certbot (khi chạy với cờ `-w`) | Tiến trình Nginx Gateway | Đây là "chiếc hộp thư" trung gian cho thử thách ACME HTTP-01. Khi Certbot xin cấp SSL, Certbot ghi file token xác thực vào thư mục này. Nginx đọc từ thư mục này và trả về cho Let's Encrypt qua URL `/.well-known/acme-challenge/<token>` trên cổng 80 mà **không cần phải tắt Nginx (Zero Downtime)**. |
+| **`mongodb_prod_data:/data/db`** | **Docker Named Volume** | `/var/lib/docker/volumes/devpulse_mongodb_prod_data/_data` | `/data/db` (Bên trong `devpulse-database`) | Tiến trình MongoDB Engine (mongod) | Tiến trình MongoDB Engine | Đảm bảo toàn bộ tài khoản người dùng, cấu hình monitors, lịch sử ping và incidents được lưu trữ bền vững vĩnh viễn trên đĩa SSD của VPS, không bao giờ bị mất khi container database bị dừng hoặc cập nhật. |
+
+#### Sơ Đồ Trực Quan Luồng Trao Đổi File Chứng Chỉ & Thử Thách ACME
+
+```text
+[ Máy Chủ VPS Host Linux ]                                  [ Docker Container: devpulse-gateway ]
+==========================                                  ======================================
+1. Lệnh 'sudo certbot ...'
+   │
+   ├─ Ghi Token xác thực ──────► [ Named Volume: certbot-var ] ──── Mount ───► /var/www/certbot
+   │                             (/var/lib/docker/volumes/...)                     │
+   │                                                                               ▼
+   │                                                                     Nginx serve qua Port 80
+   │                                                                     /.well-known/acme-challenge/
+   │                                                                               │
+   │ ◄── Let's Encrypt xác thực thành công và cấp SSL ─────────────────────────────┘
+   │
+   └─ Lưu cert vào ổ cứng VPS ──► /etc/letsencrypt/live/... ────── Bind Mount ─► /etc/letsencrypt/live/...
+                                 (Host Filesystem chuẩn)                           │
+                                                                                   ▼
+                                                                         Nginx đọc cert và mở Port 443 HTTPS!
+```
 
 ---
 
@@ -898,7 +931,7 @@ sequenceDiagram
     participant Nginx as devpulse-gateway Container (Nginx Port 80)
     participant DNS as Hệ thống DNS Quốc tế
     participant LE as Máy chủ Thẩm định Let's Encrypt (USA)
-    participant VolEtc as Docker Volume certbot-etc (/etc/letsencrypt)
+    participant HostEtc as Thư mục máy chủ VPS (/etc/letsencrypt)
 
     Admin->>Certbot: 1. certbot certonly --webroot -w ... -d devpulse.dorayakiiiiz.site
     Certbot->>LE: 2. Gửi yêu cầu qua API: "Tôi muốn xin SSL cho devpulse.dorayakiiiiz.site"
@@ -912,8 +945,8 @@ sequenceDiagram
     Nginx-->>LE: 9. Trả về nội dung token với mã HTTP 200 OK
     Note over LE: Let's Encrypt đối chiếu token: CHÍNH XÁC 100%!<br/>Kết luận: Người này thực sự làm chủ server mà domain đang trỏ về!
     LE-->>Certbot: 10. Ký số điện tử và cấp cặp chứng chỉ (fullchain.pem & privkey.pem)
-    Certbot->>VolEtc: 11. Lưu cặp file vào volume chia sẻ /etc/letsencrypt/live/...
-    Note over Nginx,VolEtc: Nginx mount volume certbot-etc đọc 2 file này và mở cổng HTTPS 443 an toàn!
+    Certbot->>HostEtc: 11. Lưu cặp file vào thư mục máy chủ /etc/letsencrypt/live/...
+    Note over Nginx,HostEtc: Nginx bind mount trực tiếp /etc/letsencrypt từ VPS để đọc 2 file này và mở cổng HTTPS 443 an toàn!
 ```
 
 #### Phân Tích 11 Bước Chi Tiết:
@@ -939,8 +972,8 @@ sequenceDiagram
    Nginx đọc file `token_abc_123` từ đĩa và trả về cho Let's Encrypt.
 8. **Bước 9:** Let's Encrypt nhận được file, kiểm tra nội dung khớp chính xác từng ký tự với mã họ đã sinh ra.
 9. **Bước 10:** Let's Encrypt xác nhận: *"Chủ nhân của tên miền này chính là người đang vận hành máy chủ tại IP 20.48.112.82"*. Let's Encrypt lập tức dùng Khóa Gốc của họ ký chứng chỉ số và trả về cho Certbot.
-10. **Bước 11:** Certbot lưu cặp khóa `fullchain.pem` và `privkey.pem` vào thư mục `/etc/letsencrypt/live/devpulse.dorayakiiiiz.site/` trên VPS.
-11. Container `devpulse-gateway` (nhờ gắn volume `certbot-etc`) đọc 2 file này, mở cổng HTTPS 443 và phục vụ lưu lượng bảo mật!
+10. **Bước 11:** Certbot lưu cặp khóa `fullchain.pem` và `privkey.pem` vào thư mục `/etc/letsencrypt/live/devpulse.dorayakiiiiz.site/` trên ổ cứng VPS.
+11. Container `devpulse-gateway` (nhờ gắn bind mount trực tiếp `/etc/letsencrypt:/etc/letsencrypt:ro` từ máy chủ) đọc 2 file này, mở cổng HTTPS 443 và phục vụ lưu lượng bảo mật!
 
 ---
 
@@ -1061,4 +1094,30 @@ Khi bạn cấu hình DNS cho domain `devpulse.dorayakiiiiz.site`:
 | **Trang web báo lỗi "502 Bad Gateway"** | Backend container chưa khởi động xong hoặc bị crash do thiếu biến môi trường | `docker compose -f ~/devpulse/docker-compose.prod.yml logs devpulse-backend`<br/>Kiểm tra lại cú pháp file `~/devpulse/.env`. |
 | **Sự kiện SSE không nhảy thời gian thực** | Nginx proxy_buffering chưa tắt | Kiểm tra lại file `gateway.conf` tại block `/api/sse/`: bắt buộc phải có `proxy_buffering off;` và `proxy_read_timeout 24h;`. |
 | **Database không lưu được dữ liệu** | Quyền ghi volume hoặc thiếu bộ nhớ | `docker stats` $\rightarrow$ kiểm tra mức tiêu thụ RAM của `devpulse-database`.<br/>`docker logs devpulse-database` $\rightarrow$ xem log khởi tạo WiredTiger. |
+| **Vào HTTPS báo "Không bảo mật" hoặc F5 bị đăng xuất** | Nginx mount nhầm named volume rác hoặc truy cập bằng IP thô | 1. Kiểm tra cert trong container: `docker exec devpulse-gateway ls -la /etc/letsencrypt/live/devpulse.dorayakiiiiz.site/`. Đảm bảo dùng bind mount `/etc/letsencrypt:/etc/letsencrypt:ro`.<br/>2. Truy cập bằng đúng domain `https://devpulse.dorayakiiiiz.site` (không dùng IP).<br/>3. Đảm bảo Express có `app.set('trust proxy', 1)`. Hệ thống đã loại bỏ hoàn toàn CORS và biến `CLIENT_URL` thừa thãi. |
 | **Muốn Rollback về phiên bản cũ ngay lập tức** | Phiên bản mới gặp lỗi logic | Sửa tag trong `docker-compose.prod.yml` từ `:latest` thành mã commit hash cũ (ví dụ `:b92fb23`) rồi gõ `docker compose up -d`. |
+
+---
+
+### 8.1. Cơ Chế Bảo Mật Phiên Làm Việc (Session Security, Cookies & Reverse Proxy Behind HTTPS)
+
+Hiện tượng người dùng đăng nhập thành công nhưng khi tải lại trang (F5) lập tức bị đăng xuất bắt nguồn từ chuỗi bảo mật nghiêm ngặt giữa Trình duyệt $\leftrightarrow$ Nginx Reverse Proxy $\leftrightarrow$ Express Backend:
+
+#### 1. Thuộc tính `secure: true` trong môi trường Production
+- Trong [`backend/src/controllers/authController.ts`](../backend/src/controllers/authController.ts), khi hệ thống chạy ở chế độ production (`NODE_ENV=production`), cookie `refreshToken` được thiết lập cờ `secure: true`.
+- **Nguyên lý bảo mật RFC 6265:** Trình duyệt **chỉ lưu và gửi lại** cookie này nếu kết nối mạng là HTTPS an toàn và có chứng chỉ số hợp lệ.
+- Nếu người dùng truy cập qua HTTP (hoặc HTTPS bị trình duyệt cảnh báo đỏ "Không bảo mật"): Trình duyệt sẽ tự động từ chối lưu hoặc chặn không gửi cookie `refreshToken`.
+- Khi F5 trang, hàm khởi tạo session `hydrateSession()` trong `App.tsx` gửi request `POST /api/auth/refresh-token`. Do không có cookie gửi kèm, Backend trả về mã lỗi HTTP 401 Unauthorized $\rightarrow$ Frontend buộc phải xóa session và đẩy người dùng về trang đăng nhập.
+
+#### 2. Khai báo `app.set('trust proxy', 1)` trong Express
+- Trong kiến trúc Docker Production, Nginx đóng vai trò Edge Gateway tiếp nhận kết nối HTTPS từ Internet, giải mã SSL (TLS Termination), sau đó chuyển tiếp gói tin dạng HTTP nội bộ vào container Backend (`devpulse-backend:5000`).
+- Nginx đính kèm header chuẩn `X-Forwarded-Proto: https` để thông báo cho Backend biết người dùng thực sự đang dùng HTTPS.
+- Nếu Backend thiếu cấu hình `app.set('trust proxy', 1)`, Express mặc định **không tin tưởng** header này và coi toàn bộ kết nối là HTTP không an toàn (`req.secure = false`). Khi đó, Express xử lý sai lệch việc phát hành và nhận diện cookie có cờ `secure`.
+
+#### 3. Cấu hình `sameSite: 'lax'` thay vì `'strict'`
+- Giá trị `sameSite: 'strict'` cực kỳ khắt khe: Trình duyệt sẽ chặn không gửi cookie trong các ngữ cảnh điều hướng trang hoặc reload nếu context origin có bất kỳ sự lệch nhẹ nào.
+- Chuyển sang chuẩn công nghiệp `sameSite: 'lax'` cho phép trình duyệt tự động đính kèm cookie `refreshToken` trong các request làm mới trang (top-level GET navigation) của chính website, đồng thời vẫn bảo vệ an toàn 100% trước các cuộc tấn công CSRF từ bên ngoài.
+
+#### 4. Bản chất Same-Origin qua Reverse Proxy: Loại bỏ hoàn toàn CORS và biến `CLIENT_URL`
+- Trong kiến trúc DevPulse, cả Frontend React SPA (`/`) lẫn Backend API (`/api/`) đều nằm chung dưới một tên miền duy nhất thông qua Edge Gateway Nginx (ở Production) và Vite Dev Proxy (ở Local).
+- Trình duyệt coi toàn bộ các request là **Same-Origin $100\%$**. Vì vậy, middleware `cors` và biến `CLIENT_URL` là cấu hình thừa thãi được loại bỏ hoàn toàn khỏi Backend, triệt tiêu tận gốc lỗi từ chối cookie do lệch origin khi người dùng truy cập qua các URL khác nhau.
