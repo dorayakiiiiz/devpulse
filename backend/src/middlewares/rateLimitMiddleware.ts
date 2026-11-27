@@ -1,5 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import { AppError } from '../utils/appError.js';
+import { env } from '../config/env.js';
 
 // Rate limiting middleware protecting authentication endpoints against brute-force attacks
 export const authLimiter = rateLimit({
@@ -7,7 +8,7 @@ export const authLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: () => process.env.NODE_ENV === 'test',
+  skip: () => env.NODE_ENV === 'test',
   handler: (_req, _res, next) => {
     next(new AppError('Too many authentication attempts from this IP, please try again after 15 minutes', 429));
   },
@@ -19,7 +20,7 @@ export const otpIpLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: () => process.env.NODE_ENV === 'test',
+  skip: () => env.NODE_ENV === 'test',
   handler: (_req, _res, next) => {
     next(new AppError('Too many requests from this IP, please try again after 15 minutes', 429));
   },
@@ -31,6 +32,7 @@ export const instantPingLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => env.NODE_ENV === 'test',
   keyGenerator: (req) => req.user!.id,
   handler: (_req, _res, next) => {
     next(new AppError('Instant ping limit exceeded. Maximum 5 requests per minute allowed.', 429));

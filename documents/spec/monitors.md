@@ -183,7 +183,7 @@ export interface MonitorMetricItem {
 **Invariants:**
 - Mọi thao tác truy vấn và biến đổi dữ liệu trên `monitors` bắt buộc phải chứa điều kiện lọc `userId` để bảo vệ cô lập dữ liệu người dùng.
 - Giá trị trường `interval` chỉ chấp nhận một trong ba số nguyên cố định là 30, 60 hoặc 300.
-- Đường dẫn `url` phải bắt đầu bằng tiền tố `http://` hoặc `https://`.
+- Đường dẫn `url` phải bắt đầu bằng tiền tố `http://` hoặc `https://` và không được trỏ tới loopback, private IP (RFC1918), cloud metadata (`169.254.169.254`) hoặc hostname nội bộ Docker (chống SSRF).
 - Trường `daysRemaining` trong `sslInfo` phải là số nguyên tính từ ngày hiện tại đến mốc `validTo`.
 
 ---
@@ -193,6 +193,7 @@ export interface MonitorMetricItem {
 | Điều kiện | Người dùng thấy gì | Hệ thống xử lý |
 | :--- | :--- | :--- |
 | URL không đúng định dạng mạng | Định dạng URL không hợp lệ | Trả về HTTP 400 |
+| URL trỏ vào loopback, private IP, metadata hoặc hostname nội bộ | Không cho phép URL mạng nội bộ | Trả về HTTP 400 |
 | Interval khác 30, 60, 300 | Chu kỳ kiểm tra chỉ nhận 30, 60 hoặc 300 giây | Trả về HTTP 400 |
 | Thao tác mục tiêu của user khác hoặc không tồn tại | Không tìm thấy mục tiêu theo dõi | Trả về HTTP 404 |
 | URL https có chứng chỉ SSL lỗi | Mục tiêu được tạo kèm cảnh báo chứng chỉ không hợp lệ | Ghi nhận lỗi chứng chỉ vào `sslInfo` và trả về HTTP 201 |

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { monitorService } from '../services/monitorService';
+import { incidentService } from '../services/incidentService';
 import { toast } from '../stores/toastStore';
 import { useRealtimeStore } from '../stores/realtimeStore';
 import { getApiErrorMessage } from '../lib/apiError';
@@ -41,7 +42,7 @@ export function useMonitorDetail(id: string | undefined) {
     try {
       const [monitorData, incidentsData] = await Promise.all([
         monitorService.getMonitorById(id),
-        monitorService.getMonitorIncidents(id),
+        incidentService.getIncidentsByMonitor(id),
       ]);
       if (!isDeletedRef.current) {
         setMonitor(monitorData);
@@ -92,7 +93,7 @@ export function useMonitorDetail(id: string | undefined) {
         if (isDuplicate) return prev;
         return [
           {
-            id: crypto.randomUUID(),
+            id: `sse-${event.monitorId}-${event.timestamp}`,
             monitorId: event.monitorId,
             timestamp: event.timestamp,
             statusCode: event.statusCode,
@@ -207,7 +208,7 @@ export function useMonitorDetail(id: string | undefined) {
           if (exists) return prev;
           return [
             {
-              id: crypto.randomUUID(),
+              id: `ping-${result.monitorId}-${result.checkedAt}`,
               monitorId: result.monitorId,
               timestamp: result.checkedAt,
               statusCode: result.statusCode,

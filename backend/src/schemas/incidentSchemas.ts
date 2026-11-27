@@ -12,13 +12,13 @@ export const queryIncidentsSchema = z.object({
     monitorId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid monitor ID format').optional(),
     limit: z
       .string()
+      .regex(/^\d+$/, 'Limit must be a non-negative integer')
       .optional()
       .transform((val) => (val ? parseInt(val, 10) : 50)),
     skip: z
       .string()
+      .regex(/^\d+$/, 'Skip must be a non-negative integer')
       .optional()
       .transform((val) => (val ? parseInt(val, 10) : 0)),
   }),
 });
-
-export type QueryIncidentsQuery = z.infer<typeof queryIncidentsSchema>['query'];

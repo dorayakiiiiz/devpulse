@@ -96,7 +96,7 @@ export function useOverview() {
         if (exists) return prev;
         return [
           {
-            id: crypto.randomUUID(),
+            id: `sse-${event.monitorId}-${event.timestamp}`,
             monitorId: event.monitorId,
             timestamp: event.timestamp,
             statusCode: event.statusCode,
@@ -113,7 +113,12 @@ export function useOverview() {
   // Handle incoming realtime incident alerts to refresh open incidents count
   const handleRealtimeIncident = useCallback((event: SseIncidentAlertEvent) => {
     if (event.status === 'ongoing') {
-      incidentService.getIncidents({ status: 'ongoing' }).then(setOngoingIncidents).catch(() => {});
+      incidentService
+        .getIncidents({ status: 'ongoing' })
+        .then(setOngoingIncidents)
+        .catch((err) => {
+          console.error('[Overview] Failed to refresh ongoing incidents:', err);
+        });
     } else {
       setOngoingIncidents((prev) => prev.filter((item) => item.id !== event.incidentId));
     }

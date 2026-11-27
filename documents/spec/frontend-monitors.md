@@ -81,7 +81,7 @@ Xây dựng toàn diện giao diện và luồng xử lý người dùng cho ph�
 2. Component thực hiện song song:
    - `monitorService.getMonitorById(id)` lấy cấu hình và SSL info.
    - `monitorService.getMetrics(id, { range: '1h' })` lấy danh sách điểm dữ liệu và bảng Recent pings.
-   - `monitorService.getMonitorIncidents(id)` lấy lịch sử sự cố.
+   - `incidentService.getIncidentsByMonitor(id)` lấy lịch sử sự cố.
 3. Khi người dùng bấm chuyển đổi tab dải thời gian `1h` $\rightarrow$ `24h` $\rightarrow$ `7d`:
    - Gửi request `monitorService.getMetrics(id, { range })`.
    - Cập nhật biểu đồ SVG và danh sách pings tương ứng.

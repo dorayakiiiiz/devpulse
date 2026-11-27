@@ -16,6 +16,7 @@ export class MetricBuffer {
   private isFlushing = false;
   private lastFlushAt: Date | null = null;
   private readonly batchSizeLimit = 100;
+  private readonly maxBufferSize = 5000;
   private readonly flushIntervalMs = 5000;
 
   // Initialize background timer ticking every 5 seconds to flush accumulated metrics
@@ -77,8 +78,13 @@ export class MetricBuffer {
       this.lastFlushAt = new Date();
       return itemsToFlush.length;
     } catch (error) {
-      // Re-insert items at the beginning of buffer so no metric records are lost during network glitches
+      // Re-insert items at the beginning of buffer and enforce hard cap to prevent OOM during prolonged DB outages
       this.buffer.unshift(...itemsToFlush);
+      if (this.buffer.length > this.maxBufferSize) {
+        const overflowCount = this.buffer.length - this.maxBufferSize;
+        this.buffer.splice(0, overflowCount);
+        console.warn(`[MetricBuffer] Buffer exceeded ${this.maxBufferSize} items; dropped ${overflowCount} oldest metrics.`);
+      }
       console.error('[MetricBuffer] Error during metric bulkWrite flush:', error);
       return 0;
     } finally {

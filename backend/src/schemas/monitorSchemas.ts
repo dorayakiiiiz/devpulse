@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isSafeMonitorUrl } from '../utils/urlValidator.js';
 
 const urlValidation = z
   .string({ required_error: 'Target URL is required' })
@@ -6,6 +7,9 @@ const urlValidation = z
   .url('Invalid URL format')
   .refine((val) => val.startsWith('http://') || val.startsWith('https://'), {
     message: 'URL must start with http:// or https://',
+  })
+  .refine(isSafeMonitorUrl, {
+    message: 'Private or internal network URLs are not allowed',
   });
 
 const intervalValidation = z.union([z.literal(30), z.literal(60), z.literal(300)], {
@@ -62,6 +66,7 @@ export const queryMonitorMetricsSchema = z.object({
     range: z.enum(['1h', '24h', '7d']).optional(),
     limit: z
       .string()
+      .regex(/^\d+$/, 'Limit must be a positive integer')
       .optional()
       .transform((val) => (val ? parseInt(val, 10) : 50)),
   }),

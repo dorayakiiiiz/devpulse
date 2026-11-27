@@ -150,7 +150,7 @@ export interface PingEngineStatusResponse {
 | Target server quá 10s không phản hồi | Ngắt kết nối do timeout | `statusCode: 408`, `latency: 10000`, `isUp: false`, `error: 'ETIMEDOUT'` |
 | Tên miền target không phân giải được | Bắt lỗi phân giải DNS | `statusCode: 0`, `latency: 0`, `isUp: false`, `error: 'ENOTFOUND'` |
 | Target từ chối kết nối cổng mạng | Bắt lỗi từ chối kết nối | `statusCode: 0`, `latency: 0`, `isUp: false`, `error: 'ECONNREFUSED'` |
-| MongoDB ngắt kết nối khi đang bulkWrite | Giữ nguyên dữ liệu trong buffer và thử lại ở chu kỳ xả kế tiếp | Không vứt bỏ dữ liệu trên RAM |
+| MongoDB ngắt kết nối khi đang bulkWrite | Nhét lại dữ liệu vào buffer với giới hạn trần 5000 bản ghi (cắt bỏ phần cũ nhất nếu vượt trần để chống OOM) và thử lại ở chu kỳ xả kế tiếp | Giữ tối đa 5000 bản ghi gần nhất trên RAM |
 | Số lượng monitors cần ping vượt quá 100 | Hàng chờ `p-limit` điều tiết tuần tự với nhịp nghỉ 100ms | Không làm nghẽn socket mạng của máy chủ |
 
 ---

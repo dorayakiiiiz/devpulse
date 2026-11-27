@@ -15,8 +15,9 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci
 
-# Copy frontend source code and build configs
+# Copy frontend source code, public assets, and build configs
 COPY tsconfig*.json vite.config.ts tailwind.config.ts postcss.config.js index.html ./
+COPY public/ ./public/
 COPY src/ ./src/
 
 # Build optimized production bundle

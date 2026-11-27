@@ -374,7 +374,8 @@ location /api/sse/ {
     proxy_http_version 1.1;
     proxy_set_header Connection "";
 
-    # 2. Vô hiệu hóa tuyệt đối bộ đệm proxy (Crucial for Realtime)
+    # 2. Vô hiệu hóa tuyệt đối nén gzip và bộ đệm proxy (Crucial for Realtime)
+    gzip off;
     proxy_buffering off;
     proxy_cache off;
 

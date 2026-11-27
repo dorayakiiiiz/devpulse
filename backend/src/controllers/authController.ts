@@ -5,7 +5,24 @@ import { AppError } from '../utils/appError.js';
 import { env } from '../config/env.js';
 
 export const REFRESH_COOKIE_NAME = 'refreshToken';
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_REFRESH_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Convert JWT duration strings (e.g. 7d, 12h, 30m, 60s) into milliseconds for cookie maxAge
+function parseDurationToMs(duration: string): number {
+  const match = /^(\d+)([smhd])$/.exec(duration.trim());
+  if (!match) {
+    return DEFAULT_REFRESH_MAX_AGE_MS;
+  }
+  const value = Number(match[1]);
+  const unit = match[2];
+  const multipliers: Record<string, number> = {
+    s: 1000,
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+  };
+  return value * multipliers[unit];
+}
 
 // Base cookie configuration options enforcing HttpOnly and standard lax isolation
 export const baseCookieOptions = {
@@ -15,10 +32,10 @@ export const baseCookieOptions = {
   path: '/',
 };
 
-// Refresh token cookie configuration with retention lifetime
+// Refresh token cookie configuration with retention lifetime synchronized to JWT_REFRESH_EXPIRES_IN
 export const refreshCookieOptions = {
   ...baseCookieOptions,
-  maxAge: SEVEN_DAYS_MS,
+  maxAge: parseDurationToMs(env.JWT_REFRESH_EXPIRES_IN),
 };
 
 // Handle account registration and dispatch email verification OTP

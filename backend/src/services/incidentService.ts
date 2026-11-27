@@ -11,6 +11,8 @@ import { IIncident, IncidentStatus } from '../models/incidentModel.js';
 import { IMonitor } from '../models/monitorModel.js';
 import { AppError } from '../utils/appError.js';
 
+export type { IncidentFilterOptions };
+
 // Type guard identifying populated monitor documents safely without loose casting
 function isPopulatedMonitor(monitor: Types.ObjectId | IMonitor): monitor is IMonitor {
   return typeof monitor === 'object' && monitor !== null && 'name' in monitor;
@@ -60,10 +62,14 @@ export class IncidentService {
     }
   }
 
-  // Subscribe to internal PingCompleted events from Ping Engine
+  // Subscribe to internal PingCompleted events from Ping Engine with error isolation
   private registerEventBusListeners(): void {
     eventBus.onPingCompleted(async (payload: PingCompletedEvent) => {
-      await this.handlePingCompleted(payload);
+      try {
+        await this.handlePingCompleted(payload);
+      } catch (error) {
+        console.error(`[IncidentService] Unhandled error processing ping for monitor ${payload.monitorId}:`, error);
+      }
     });
   }
 
@@ -281,8 +287,9 @@ export class IncidentService {
       incidentId: incident._id.toString(),
       monitorId: monitor._id.toString(),
       userId,
-      status: 'ongoing',
+      status: updated.status,
       startedAt: incident.startedAt.toISOString(),
+      resolvedAt: updated.resolvedAt ? updated.resolvedAt.toISOString() : undefined,
       errorMessage: incident.errorDetails.errorMessage,
       aiPostMortem: {
         summary: postMortem.summary,

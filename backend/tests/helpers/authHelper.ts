@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { User, UserRole } from '../../src/models/userModel.js';
+import { UserModel, UserRole } from '../../src/models/userModel.js';
 import { env } from '../../src/config/env.js';
 
 interface CreateTestUserOptions {
@@ -23,7 +23,7 @@ export async function createTestUser(options: CreateTestUserOptions = {}) {
   const salt = await bcrypt.genSalt(10);
   const passwordHash = await bcrypt.hash(rawPassword, salt);
 
-  const user = await User.create({
+  const user = await UserModel.create({
     name,
     email,
     passwordHash,

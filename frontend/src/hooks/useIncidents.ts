@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { incidentService } from '../services/incidentService';
 import { IncidentResponseDto, IncidentStatus } from '../types/incident';
@@ -13,6 +13,8 @@ export function useIncidents() {
   const queryIncidentId = searchParams.get('id');
 
   const [incidents, setIncidents] = useState<IncidentResponseDto[]>([]);
+  const incidentsRef = useRef<IncidentResponseDto[]>([]);
+  incidentsRef.current = incidents;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<IncidentStatus>('ongoing');
   const [isLoading, setIsLoading] = useState(true);
@@ -48,24 +50,24 @@ export function useIncidents() {
   // Handle incoming realtime incident updates dispatched via Server-Sent Events
   const handleRealtimeIncident = useCallback(
     (event: SseIncidentAlertEvent) => {
-      setIncidents((prev) => {
-        const exists = prev.some((item) => item.id === event.incidentId);
-        if (exists) {
-          return prev.map((item) =>
+      const exists = incidentsRef.current.some((item) => item.id === event.incidentId);
+      if (exists) {
+        setIncidents((prev) =>
+          prev.map((item) =>
             item.id === event.incidentId
               ? {
-                ...item,
-                status: event.status,
-                resolvedAt: event.resolvedAt ?? item.resolvedAt,
-                aiPostMortem: event.aiPostMortem ?? item.aiPostMortem,
-              }
+                  ...item,
+                  status: event.status,
+                  resolvedAt: event.resolvedAt ?? item.resolvedAt,
+                  aiPostMortem: event.aiPostMortem ?? item.aiPostMortem,
+                }
               : item
-          );
-        }
-        // Fetch fresh state to populate relational monitor names and full error logs
-        fetchIncidents();
-        return prev;
-      });
+          )
+        );
+        return;
+      }
+      // Fetch fresh state outside state updater to populate relational monitor names and full error logs
+      fetchIncidents();
     },
     [fetchIncidents]
   );

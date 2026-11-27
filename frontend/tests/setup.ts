@@ -15,17 +15,38 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 });
 
-// Mock browser EventSource for real-time SSE testing
+// Mock browser EventSource supporting named SSE event listeners for testing
 class MockEventSource {
+  static latestInstance: MockEventSource | null = null;
   url: string;
   readyState = 0;
   onopen: (() => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
+  onmessage: ((event: MessageEvent<string>) => void) | null = null;
   onerror: (() => void) | null = null;
+  private listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
 
   constructor(url: string) {
     this.url = url;
-    setTimeout(() => this.onopen?.(), 10);
+    MockEventSource.latestInstance = this;
+    setTimeout(() => {
+      this.readyState = 1;
+      this.onopen?.();
+    }, 10);
+  }
+
+  addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
+    const existing = this.listeners.get(type) ?? new Set();
+    existing.add(listener);
+    this.listeners.set(type, existing);
+  }
+
+  removeEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  emitNamedEvent(type: string, payload: unknown): void {
+    const event = { data: JSON.stringify(payload) } as MessageEvent<string>;
+    this.listeners.get(type)?.forEach((listener) => listener(event));
   }
 
   close(): void {

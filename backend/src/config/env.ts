@@ -10,7 +10,7 @@ const envSchema = z.object({
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters long'),
   JWT_EXPIRES_IN: z.string().default('15m'),
-  JWT_REFRESH_SECRET: z.string().min(16, 'JWT_REFRESH_SECRET must be at least 16 characters long').default('devpulse_super_secret_refresh_jwt_key_32_characters_long'),
+  JWT_REFRESH_SECRET: z.string().min(16, 'JWT_REFRESH_SECRET must be at least 16 characters long'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.string().optional().transform((val) => (val ? parseInt(val, 10) : undefined)),
@@ -22,8 +22,6 @@ const envSchema = z.object({
   GROQ_MODEL: z.string().default('openai/gpt-oss-120b'),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-1.5-flash'),
-  LLM_API_KEY: z.string().optional(),
-  LLM_MODEL: z.string().optional().default('openai/gpt-oss-120b'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

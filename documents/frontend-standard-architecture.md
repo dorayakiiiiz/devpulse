@@ -711,7 +711,6 @@ import {
   MonitorResponseDto,
   UpdateMonitorPayload,
 } from '../types/monitor';
-import { IncidentResponseDto } from '../types/incident';
 
 export const monitorService = {
   // Fetch user monitors
@@ -752,12 +751,6 @@ export const monitorService = {
     const response = await apiClient.get<ApiSuccessResponse<MonitorMetricDto[]>>(`/monitors/${id}/metrics`, {
       params: options,
     });
-    return response.data.data;
-  },
-
-  // Fetch incidents for a target monitor
-  async getMonitorIncidents(id: string): Promise<IncidentResponseDto[]> {
-    const response = await apiClient.get<ApiSuccessResponse<IncidentResponseDto[]>>(`/monitors/${id}/incidents`);
     return response.data.data;
   },
 
@@ -1027,42 +1020,46 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       set({ isConnected: true });
     };
 
-    es.onmessage = (event) => {
+    es.addEventListener('MONITOR_PING', (event) => {
       try {
-        const payload = JSON.parse(event.data) as SseServerEvent;
-
-        if (payload.type === 'MONITOR_PING') {
-          pingSubscribers.forEach((cb) => {
-            try {
-              cb(payload);
-            } catch (err) {
-              console.error('[Realtime SSE] Error in ping subscriber callback:', err);
-            }
-          });
-        } else if (payload.type === 'INCIDENT_ALERT') {
-          if (payload.status === 'ongoing') {
-            toast.error(
-              payload.errorMessage || 'Service disruption detected on monitored endpoint.',
-              'Incident Alert'
-            );
-          } else if (payload.status === 'resolved') {
-            toast.success(
-              'Monitored endpoint has fully recovered.',
-              'Incident Resolved'
-            );
+        const payload = JSON.parse((event as MessageEvent<string>).data) as SseMonitorPingEvent;
+        pingSubscribers.forEach((cb) => {
+          try {
+            cb(payload);
+          } catch (err) {
+            console.error('[Realtime SSE] Error in ping subscriber callback:', err);
           }
-          incidentSubscribers.forEach((cb) => {
-            try {
-              cb(payload);
-            } catch (err) {
-              console.error('[Realtime SSE] Error in incident subscriber callback:', err);
-            }
-          });
-        }
-      } catch {
-        // Discard heartbeat comments and non-JSON data safely
+        });
+      } catch (err) {
+        console.error('[Realtime SSE] Failed to parse MONITOR_PING payload:', err);
       }
-    };
+    });
+
+    es.addEventListener('INCIDENT_ALERT', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent<string>).data) as SseIncidentAlertEvent;
+        if (payload.status === 'ongoing') {
+          toast.error(
+            payload.errorMessage ?? 'Service disruption detected on monitored endpoint.',
+            'Incident Alert'
+          );
+        } else if (payload.status === 'resolved') {
+          toast.success(
+            'Monitored endpoint has fully recovered.',
+            'Incident Resolved'
+          );
+        }
+        incidentSubscribers.forEach((cb) => {
+          try {
+            cb(payload);
+          } catch (err) {
+            console.error('[Realtime SSE] Error in incident subscriber callback:', err);
+          }
+        });
+      } catch (err) {
+        console.error('[Realtime SSE] Failed to parse INCIDENT_ALERT payload:', err);
+      }
+    });
 
     es.onerror = () => {
       set({ isConnected: false });
@@ -1136,7 +1133,7 @@ useEffect(() => {
 2. **Cơ chế Lọc Bỏ Heartbeat Comment của Server:**
    - Phía Backend Node.js định kỳ 30 giây gửi một dòng comment W3C: `: heartbeat\n\n`.
    - Theo đặc tả W3C HTML5 Server-Sent Events, bất kỳ dòng dữ liệu nào bắt đầu bằng dấu hai chấm (`:`) đều được trình duyệt coi là comment.
-   - Trình duyệt sẽ âm thầm tiếp nhận byte để giữ socket mạng luôn mở qua Nginx Reverse Proxy mà hoàn toàn không kích hoạt sự kiện `onmessage`. Khối `try/catch` bổ sung chỉ nhằm bảo vệ ứng dụng khỏi dữ liệu không hợp lệ.
+   - Trình duyệt sẽ âm thầm tiếp nhận byte để giữ socket mạng luôn mở qua Nginx Reverse Proxy mà hoàn toàn không kích hoạt các event listener (`MONITOR_PING`, `INCIDENT_ALERT`). Khối `try/catch` bổ sung chỉ nhằm bảo vệ ứng dụng khỏi dữ liệu JSON không hợp lệ.
 
 3. **Điều phối Sự kiện Nghiệp vụ Tập trung:**
    - **Sự kiện `MONITOR_PING`:** Phát sinh khi Ping Engine kiểm tra xong một trang web. Dữ liệu chứa `{ monitorId, statusCode, latency, isUp, timestamp }`. Store fan-out trực tiếp tới các callback `pingSubscribers`.

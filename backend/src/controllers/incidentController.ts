@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { incidentService } from '../services/incidentService.js';
-import { IncidentFilterOptions } from '../repositories/incidentRepository.js';
+import { incidentService, IncidentFilterOptions } from '../services/incidentService.js';
 import { sendSuccess } from '../utils/response.js';
 
 // Retrieve paginated incidents belonging to current authenticated user

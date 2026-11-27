@@ -1,4 +1,5 @@
 import { IMonitor } from '../models/monitorModel.js';
+import { isSafeMonitorUrl } from '../utils/urlValidator.js';
 
 export interface PingExecutionResult {
   statusCode: number;
@@ -22,6 +23,16 @@ export class PingExecutor {
     let isUp = false;
     let errorMessage: string | undefined;
 
+    if (!isSafeMonitorUrl(monitor.url)) {
+      return {
+        statusCode: 502,
+        latency: 1,
+        isUp: false,
+        error: 'Blocked private or internal target URL',
+        checkedAt: new Date(),
+      };
+    }
+
     try {
       const response = await fetch(monitor.url, {
         method: monitor.method || 'GET',
@@ -30,6 +41,8 @@ export class PingExecutor {
       });
 
       statusCode = response.status;
+      // Release undici socket and response stream immediately since body is not consumed
+      await response.body?.cancel();
       // 2xx and 3xx responses are classified as operational uptime
       isUp = statusCode >= 200 && statusCode < 400;
 

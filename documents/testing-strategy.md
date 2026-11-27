@@ -277,16 +277,35 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 });
 
-// Giả lập Native Browser EventSource cho SSE tests
+// Giả lập Native Browser EventSource hỗ trợ named SSE listeners cho SSE tests
 class MockEventSource {
+  static latestInstance: MockEventSource | null = null;
   url: string;
   readyState = 0;
   onopen: (() => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
+  onmessage: ((event: MessageEvent<string>) => void) | null = null;
   onerror: (() => void) | null = null;
+  private listeners = new Map<string, Set<(event: MessageEvent<string>) => void>>();
+
   constructor(url: string) {
     this.url = url;
-    setTimeout(() => this.onopen?.(), 10);
+    MockEventSource.latestInstance = this;
+    setTimeout(() => {
+      this.readyState = 1;
+      this.onopen?.();
+    }, 10);
+  }
+  addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
+    const existing = this.listeners.get(type) ?? new Set();
+    existing.add(listener);
+    this.listeners.set(type, existing);
+  }
+  removeEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+  emitNamedEvent(type: string, payload: unknown) {
+    const event = { data: JSON.stringify(payload) } as MessageEvent<string>;
+    this.listeners.get(type)?.forEach((listener) => listener(event));
   }
   close() {
     this.readyState = 2;
@@ -395,7 +414,7 @@ afterEach(() => {
 ## 6. Định Hướng Thiết Kế CI Pipeline
 
 Quy trình CI trên GitHub Actions sẽ đảm nhận vai trò Quality Gate độc lập cho cả Backend và Frontend:
-- **Backend Quality Gate:** Kiểm tra biên dịch TypeScript (`type-check`), chạy toàn bộ test suite Unit & Integration (`npm test`) trên runner Ubuntu cách ly.
+- **Backend Quality Gate:** Kiểm tra biên dịch TypeScript (`type-check`), chạy toàn bộ test suite Unit & Integration (`npm test`), và xác thực biên dịch đầu ra (`npm run build`) trên runner Ubuntu cách ly.
 - **Frontend Quality Gate:** Kiểm tra type-checking (`type-check`), chạy toàn bộ test suite Component & Hook (`npm test`), và xác thực build đóng gói sản phẩm (`npm run build`).
 - Cấu hình file workflow cụ thể sẽ được thiết kế riêng biệt theo kiến trúc CI/CD thực tế của hệ thống.
 
@@ -449,6 +468,6 @@ Khi bước vào giai đoạn code kiểm thử ở các phiên tiếp theo, b�
    - Viết tests cho `lib/apiError`, `lib/date`, `apiClient` refresh queue, `OtpInput`, `Badge`, và các Modals.
    - Xác thực: Chạy `npm run test` trên Frontend đạt **100% Passed**.
 4. **Giai đoạn 4 (GitHub Actions CI Activation):**
-   - Tạo file `.github/workflows/ci.yml`.
+   - Tạo file `.github/workflows/ci-cd.yml`.
    - Push code lên GitHub và kiểm tra toàn bộ Quality Gates chạy xanh trên GitHub Actions tab.
 

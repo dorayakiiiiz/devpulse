@@ -21,7 +21,6 @@ flowchart TB
 
     subgraph BackendApp ["3. Node.js Layered Clean Architecture (Port 5000)"]
         subgraph PipelineLayer ["A. Express Pipeline & Security Guards"]
-            CORS["CORS (Credentials: true)"]
             CookiePars["Cookie Parser (HttpOnly refreshToken)"]
             RateLimiters["Rate Limiting (IP & OTP Cooldown)"]
             AuthGuard["authMiddleware (Header or ?token=)"]
@@ -532,6 +531,9 @@ export class MetricBuffer {
       return itemsToFlush.length;
     } catch (error) {
       this.buffer.unshift(...itemsToFlush);
+      if (this.buffer.length > 5000) {
+        this.buffer.splice(0, this.buffer.length - 5000);
+      }
       return 0;
     } finally {
       this.isFlushing = false;
@@ -829,8 +831,8 @@ Quản trị viên hệ thống có quyền truy cập endpoint bảo vệ cao c
    - Thống kê toàn diện monitors: tổng số, số active, số paused, và phân loại trạng thái up/down/pending.
    - Số lượng sự cố đang diễn ra (`ongoing`) và sự cố đã giải quyết trong 24 giờ qua.
    - Thông số RAM sử dụng của Node.js process (`process.memoryUsage()`) và trạng thái máy chủ (uptime OS, CPU cores, load average).
-2. `GET /api/admin/engine`: Trả về trạng thái nội bộ của Ping Engine: số lượng active monitors được nạp, kích thước buffer hiện tại trong RAM, thời điểm xả gần nhất và concurrency limit.
-3. `POST /api/admin/engine/flush`: Kích hoạt ép xả toàn bộ buffer RAM xuống MongoDB ngay lập tức.
+2. `GET /api/admin/ping-engine/status`: Trả về trạng thái nội bộ của Ping Engine: số lượng active monitors được nạp, kích thước buffer hiện tại trong RAM, thời điểm xả gần nhất và concurrency limit.
+3. `POST /api/admin/ping-engine/flush`: Kích hoạt ép xả toàn bộ buffer RAM xuống MongoDB ngay lập tức.
 
 ---
 

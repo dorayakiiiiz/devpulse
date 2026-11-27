@@ -7,7 +7,6 @@ import {
   MonitorResponseDto,
   UpdateMonitorPayload,
 } from '../types/monitor';
-import { IncidentResponseDto } from '../types/incident';
 
 export const monitorService = {
   // Fetch user monitors
@@ -48,12 +47,6 @@ export const monitorService = {
     const response = await apiClient.get<ApiSuccessResponse<MonitorMetricDto[]>>(`/monitors/${id}/metrics`, {
       params: options,
     });
-    return response.data.data;
-  },
-
-  // Fetch incidents for a target monitor
-  async getMonitorIncidents(id: string): Promise<IncidentResponseDto[]> {
-    const response = await apiClient.get<ApiSuccessResponse<IncidentResponseDto[]>>(`/monitors/${id}/incidents`);
     return response.data.data;
   },
 

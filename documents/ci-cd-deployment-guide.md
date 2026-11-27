@@ -242,9 +242,10 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Thiết lập cờ môi trường production
+# Thiết lập cờ môi trường production và giới hạn V8 heap dưới mức trần 256MB của container
 ENV NODE_ENV=production
 ENV PORT=5000
+ENV NODE_OPTIONS="--max-old-space-size=192"
 
 # Copy node_modules tinh gọn và package.json từ builder
 COPY --from=builder /app/node_modules ./node_modules
@@ -279,7 +280,9 @@ CMD ["node", "dist/server.js"]
 ```nginx
 server {
     listen 80;
+    listen [::]:80;
     server_name localhost;
+    server_tokens off;
 
     root /usr/share/nginx/html;
     index index.html;
@@ -301,11 +304,6 @@ server {
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
-
-    # Bổ sung các header bảo mật cơ bản
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header X-XSS-Protection "1; mode=block" always;
 }
 ```
 
@@ -328,8 +326,9 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci
 
-# Copy frontend source code and build configs
+# Copy frontend source code, public assets, and build configs
 COPY tsconfig*.json vite.config.ts tailwind.config.ts postcss.config.js index.html ./
+COPY public/ ./public/
 COPY src/ ./src/
 
 # Build optimized production bundle
@@ -382,6 +381,7 @@ server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _ devpulse.dorayakiiiiz.site;
+    server_tokens off;
 
     # Thư mục xác thực chứng chỉ SSL tự động của Let's Encrypt qua giao thức HTTP-01
     location /.well-known/acme-challenge/ {
@@ -391,7 +391,6 @@ server {
     # Tiêu chuẩn bảo mật toàn cầu
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
 
     # Nén Gzip động
     gzip on;
@@ -405,7 +404,8 @@ server {
         proxy_pass http://backend_upstream;
         proxy_http_version 1.1;
 
-        # CẤM ĐỆM DỮ LIỆU: Đảm bảo từng event MONITOR_PING / INCIDENT_ALERT được bắn tức thì xuống trình duyệt
+        # CẤM NÉN & ĐỆM DỮ LIỆU: Đảm bảo từng event MONITOR_PING / INCIDENT_ALERT được bắn tức thì xuống trình duyệt
+        gzip off;
         proxy_buffering off;
         proxy_cache off;
         
@@ -418,7 +418,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        chunked_transfer_encoding off;
     }
 
     # 2. Định tuyến các API REST thông thường
@@ -475,6 +474,12 @@ services:
         condition: service_healthy
       devpulse-frontend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - devpulse-network
     deploy:
@@ -489,7 +494,7 @@ services:
   # SERVICE 2: FRONTEND SPA (React 18 + Vite Static Server)
   # ========================================================
   devpulse-frontend:
-    image: dorayakiiiiz/devpulse-frontend:latest
+    image: dorayakiiiiz/devpulse-frontend:${IMAGE_TAG:-latest}
     container_name: devpulse-frontend
     restart: unless-stopped
     networks:
@@ -506,7 +511,7 @@ services:
   # SERVICE 3: BACKEND API SERVICE (Node.js 20 Express)
   # ========================================================
   devpulse-backend:
-    image: dorayakiiiiz/devpulse-backend:latest
+    image: dorayakiiiiz/devpulse-backend:${IMAGE_TAG:-latest}
     container_name: devpulse-backend
     restart: unless-stopped
     env_file:
@@ -649,16 +654,22 @@ jobs:
         working-directory: backend
         run: npm run type-check
 
-      # Chạy 59 bài test (Unit & Integration với MongoDB Memory Server)
+      # Chạy 63 bài test (Unit & Integration với MongoDB Memory Server)
       - name: Run Backend Tests
         working-directory: backend
         env:
           NODE_ENV: test
+          MONGODB_URI: mongodb://localhost:27017/devpulse_test
           JWT_SECRET: devpulse_test_jwt_secret_key_super_secure_32_chars
           JWT_EXPIRES_IN: 15m
           JWT_REFRESH_SECRET: devpulse_test_jwt_refresh_secret_key_super_secure_32_chars
           JWT_REFRESH_EXPIRES_IN: 7d
         run: npm test
+
+      # Xác thực biên dịch đầu ra TypeScript sang thư mục dist
+      - name: Verify Backend TypeScript Build
+        working-directory: backend
+        run: npm run build
 
   # ========================================================
   # JOB 2: FRONTEND QUALITY GATE (Chạy trên mọi PR, Push & Dispatch)
@@ -732,8 +743,8 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/devpulse-backend:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/devpulse-backend:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
       # Build image frontend từ frontend/Dockerfile và đẩy lên Docker Hub
       - name: Build & Push Frontend Image
@@ -745,8 +756,8 @@ jobs:
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/devpulse-frontend:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/devpulse-frontend:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
 
   # ========================================================
   # JOB 4: DEPLOY TO VPS (Chỉ chạy khi build image thành công)
@@ -782,33 +793,44 @@ jobs:
       # Mở kết nối shell từ xa vào VPS và thực thi chuỗi lệnh tự động hóa:
       - name: Execute Remote Deployment via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          IMAGE_TAG: ${{ github.sha }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          envs: DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,IMAGE_TAG
           script: |
+            set -e
             cd ~/devpulse
 
-            # 1. Kéo các Docker image mới nhất vừa được GitHub build từ Docker Hub về VPS.
-            # Việc kéo trước giúp quá trình tái tạo container diễn ra gần như tức thì (< 1 giây).
+            # 1. Đăng nhập Docker Hub trên VPS để kéo image ổn định và tránh giới hạn 429
+            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+
+            # 2. Kéo đúng Docker image theo commit SHA vừa được GitHub build từ Docker Hub về VPS.
             docker compose -f docker-compose.prod.yml pull
 
-            # 2. Khởi động lại các container. Cờ --remove-orphans tự động dọn các container thừa nếu có thay đổi tên service.
-            # Lệnh này chỉ recreate những container có image mới, không làm mất dữ liệu MongoDB.
+            # 3. Khởi động lại các container không gián đoạn dữ liệu MongoDB.
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
-            # 3. Dọn sạch các Docker image layers cũ mồ côi (dangling images) để bảo vệ dung lượng ổ đĩa SSD của VPS.
+            # 4. Kiểm tra cú pháp và reload nóng Nginx gateway để file gateway.conf mới có hiệu lực ngay lập tức.
+            docker exec devpulse-gateway nginx -t
+            docker exec devpulse-gateway nginx -s reload
+
+            # 5. Dọn sạch các Docker image layers cũ mồ côi (dangling images) để bảo vệ dung lượng ổ đĩa SSD của VPS.
             docker image prune -f
 
-            # 4. Trạm kiểm soát sức khỏe (Health Verification Probe):
-            # Tạm dừng 5s để backend khởi động xong, sau đó dùng curl gọi thẳng vào /api/health cục bộ.
-            # Nếu backend trả về HTTP 200 OK -> Pipeline báo xanh thành công.
-            # Nếu backend bị crash do thiếu biến môi trường -> Script thoát với Exit Code 1, báo đỏ cảnh báo cho lập trình viên.
+            # 6. Trạm kiểm soát sức khỏe (Health Verification Probe) qua Nginx Gateway:
             echo "[CD] Verifying service health..."
-            sleep 5
+            sleep 10
             docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-            curl -f http://localhost:5000/api/health || (echo "[CD Error] Backend health probe failed!" && exit 1)
+            if ! curl -f http://localhost/api/health; then
+              echo "[CD Error] Gateway / Backend health probe failed!"
+              exit 1
+            fi
             echo "[CD] DevPulse production deployment succeeded!"
 ```
 
@@ -830,14 +852,14 @@ sequenceDiagram
 
     Dev->>GH: 1. git push origin main
     GH->>Runner: 2. Kích hoạt workflow ci-cd.yml
-    Note over Runner: 3. Chạy song song Job 1 & Job 2:<br/>- npm ci<br/>- tsc --noEmit (0 errors)<br/>- vitest (118/118 tests pass)<br/>- vite build
+    Note over Runner: 3. Chạy song song Job 1 & Job 2:<br/>- npm ci<br/>- tsc --noEmit (0 errors)<br/>- vitest (122/122 tests pass)<br/>- tsc & vite build
     Runner->>Hub: 4. Job 3 (Buildx): Build 2 Dockerfiles multi-stage<br/>Push dorayakiiiiz/devpulse-backend & frontend (:latest & :sha)
     Runner->>VPS_SSH: 5. Job 4 (SCP Action qua Port 22):<br/>Copy đè docker-compose.prod.yml & gateway.conf vào ~/devpulse/
-    Runner->>VPS_SSH: 6. Job 4 (SSH Action): Mở terminal remote vào ~/devpulse
-    VPS_SSH->>DockerDaemon: 7. docker compose pull (Đọc compose file, tải các layer image mới từ Docker Hub)
-    VPS_SSH->>DockerDaemon: 8. docker compose up -d --remove-orphans (So sánh image hash, recreate container đổi mới)
+    Runner->>VPS_SSH: 6. Job 4 (SSH Action): Mở terminal remote vào ~/devpulse (truyền IMAGE_TAG=sha)
+    VPS_SSH->>DockerDaemon: 7. docker compose pull (Tải đúng image theo commit SHA từ Docker Hub)
+    VPS_SSH->>DockerDaemon: 8. docker compose up -d --remove-orphans & nginx -t && nginx -s reload
     VPS_SSH->>DockerDaemon: 9. docker image prune -f (Xóa các layer dangling cũ giải phóng ổ SSD)
-    VPS_SSH->>DockerDaemon: 10. curl http://localhost:5000/api/health (Probe kiểm tra backend sống sót 100%)
+    VPS_SSH->>DockerDaemon: 10. curl -f http://localhost/api/health (Probe kiểm tra qua Nginx Gateway)
     DockerDaemon-->>Runner: Báo cáo HTTP 200 OK
     Runner-->>Dev: Pipeline Xanh Hoàn Toàn (Deployment Succeeded!)
 ```
@@ -874,8 +896,8 @@ sequenceDiagram
    - Các image phiên bản cũ sau khi bị thay thế sẽ trở thành "image mồ côi" (*dangling images - `<none>:<none>`*).
    - Lệnh này xóa sạch các layer mồ côi đó, giải phóng hoàn toàn dung lượng ổ cứng SSD của VPS (vốn chỉ có 20GB).
 10. **Bước 10 (Trạm Kiểm Tra Sức Khỏe Cuối Cùng):**
-    - Runner tạm dừng 5 giây để Node.js kết nối MongoDB và hoàn tất khởi động.
-    - Chạy lệnh `curl -f http://localhost:5000/api/health`.
+    - Runner tạm dừng 10 giây để Node.js kết nối MongoDB và hoàn tất khởi động.
+    - Chạy lệnh `curl -f http://localhost/api/health` đi qua Nginx Gateway.
     - Nếu server trả về HTTP 200 OK kèm thông số database connected, pipeline báo xanh toàn bộ $\rightarrow$ Phiên bản mới đã chính thức phục vụ người dùng!
 
 ---
@@ -1018,9 +1040,6 @@ Dán nội dung cấu hình sản xuất chuẩn duy nhất này vào:
 # Runtime Environment
 NODE_ENV=production
 PORT=5000
-
-# Client URL (Ban đầu dùng IP, sau khi trỏ domain sẽ đổi thành https://devpulse.dorayakiiiiz.site)
-CLIENT_URL=http://20.48.112.82
 
 # Database Connection (Trỏ trực tiếp vào container devpulse-database nội bộ)
 MONGODB_URI=mongodb://devpulse-database:27017/devpulse

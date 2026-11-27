@@ -26,9 +26,10 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Set production environment flags
+# Set production environment flags and cap V8 heap below 256MB container limit
 ENV NODE_ENV=production
 ENV PORT=5000
+ENV NODE_OPTIONS="--max-old-space-size=192"
 
 # Copy production node_modules from builder
 COPY --from=builder /app/node_modules ./node_modules

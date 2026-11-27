@@ -6,14 +6,14 @@ DevPulse là nền tảng giám sát uptime và hiệu năng hệ thống theo t
 
 ## Features
 
-- **Multi-Protocol Monitoring:** Kiểm tra uptime qua HTTP, HTTPS, ICMP Ping, TCP Port và DNS Query với chu kỳ cấu hình linh hoạt.
+- **HTTP/HTTPS Endpoint Monitoring:** Kiểm tra uptime các endpoint HTTP và HTTPS theo chu kỳ cấu hình linh hoạt 30s, 60s hoặc 300s kèm Fast Retest chống cảnh báo giả.
 - **SSL Certificate Monitoring:** Theo dõi thời hạn chứng chỉ SSL và tự động cảnh báo trước ngày hết hạn.
 - **Realtime Updates:** Cập nhật trạng thái và biểu đồ latency tức thì qua Server-Sent Events.
 - **Automated Incident Management:** Tự động phát hiện downtime, tạo incident và ghi nhận timeline xử lý sự cố.
 - **AI-Powered Root Cause Analysis:** Tích hợp LLM phân tích log lỗi và đề xuất nguyên nhân gốc rễ của sự cố.
 - **Public Status Page:** Xuất bản trang trạng thái dịch vụ cho người dùng bên ngoài theo dõi độ khả dụng.
-- **Authentication & Security:** Bảo vệ hệ thống bằng Two-Factor Authentication, JWT Access/Refresh Token và Role-Based Access Control.
-- **System Administration:** Giám sát tài nguyên máy chủ gồm CPU, Memory, Disk, Event Loop và quản trị cấu hình hệ thống.
+- **Authentication & Security:** Bảo vệ hệ thống bằng xác thực Email OTP, Dual-Token JWT Access/Refresh Token với Rotation, Role-Based Access Control và chặn SSRF.
+- **System Administration:** Giám sát sức khỏe backend gồm bộ nhớ Node.js Heap/RSS, uptime, độ trễ kết nối MongoDB và điều khiển Ping Engine.
 
 ---
 
@@ -102,7 +102,7 @@ dev-pulse/
 
 ### Running Tests
 
-- **Backend Test Suite:** 59 tests
+- **Backend Test Suite:** 63 tests
   ```bash
   cd backend
   npm test
@@ -139,7 +139,7 @@ git push origin main
          ▼
 ┌───────────────────────────────────────────────┐
 │              Quality Gate Job                 │
-│  - Backend: npm ci -> type-check -> 59 tests  │
+│  - Backend: npm ci -> type-check -> 63 tests  │
 │  - Frontend: npm ci -> type-check -> 59 tests │
 │  - Bundle: Frontend production build          │
 └──────────────────────┬────────────────────────┘
@@ -163,9 +163,8 @@ git push origin main
 
 ### Production Access
 
-- **Public IP:** `http://20.48.112.82`
-- **Domain:** `http://devpulse.dorayakiiiiz.site`
-- **Health Check Endpoint:** `http://20.48.112.82/api/health`
+- **Domain:** `https://devpulse.dorayakiiiiz.site`
+- **Health Check Endpoint:** `https://devpulse.dorayakiiiiz.site/api/health`
 
 ---
 

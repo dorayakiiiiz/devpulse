@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { userRepository } from '../repositories/userRepository.js';
@@ -84,7 +85,7 @@ export class AuthService {
       });
     }
 
-    const rawOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const rawOtp = this.generateOtpCode();
     const codeSalt = await bcrypt.genSalt(10);
     const codeHash = await bcrypt.hash(rawOtp, codeSalt);
 
@@ -168,7 +169,7 @@ export class AuthService {
       throw new AppError('Email is already verified', 400);
     }
 
-    const rawOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const rawOtp = this.generateOtpCode();
     const codeSalt = await bcrypt.genSalt(10);
     const codeHash = await bcrypt.hash(rawOtp, codeSalt);
 
@@ -223,7 +224,7 @@ export class AuthService {
       throw new AppError('Please verify your email address before continuing', 403);
     }
 
-    if (decoded.tokenVersion !== undefined && decoded.tokenVersion !== user.tokenVersion) {
+    if (decoded.tokenVersion !== user.tokenVersion) {
       throw new AppError('Invalid or revoked refresh token', 401);
     }
 
@@ -265,7 +266,7 @@ export class AuthService {
       throw new AppError('Email does not exist', 404);
     }
 
-    const rawOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const rawOtp = this.generateOtpCode();
     const salt = await bcrypt.genSalt(10);
     const codeHash = await bcrypt.hash(rawOtp, salt);
 
@@ -313,6 +314,11 @@ export class AuthService {
     await userRepository.updatePassword(user._id.toString(), newPasswordHash);
     await userRepository.incrementTokenVersion(user._id.toString());
     await otpRepository.deleteByEmail(normalizedEmail);
+  }
+
+  // Generate cryptographically secure 6-digit OTP code
+  private generateOtpCode(): string {
+    return crypto.randomInt(100000, 1000000).toString();
   }
 
   // Generate signed access and refresh tokens

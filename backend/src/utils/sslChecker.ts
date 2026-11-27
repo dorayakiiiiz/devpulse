@@ -2,9 +2,14 @@ import tls from 'tls';
 import net from 'net';
 import { URL } from 'url';
 import { ISslInfo } from '../models/monitorModel.js';
+import { isSafeMonitorUrl } from './urlValidator.js';
 
 // Inspect SSL certificate properties for a given HTTPS URL
 export async function checkSslCertificate(targetUrl: string, timeoutMs = 5000): Promise<ISslInfo | undefined> {
+  if (!isSafeMonitorUrl(targetUrl)) {
+    return undefined;
+  }
+
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(targetUrl);

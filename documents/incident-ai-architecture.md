@@ -186,10 +186,14 @@ async init(): Promise<void> {
   }
 }
 
-// 2. Đăng ký listener nhận sự kiện PING_COMPLETED phát ra từ PingEngine
+// 2. Đăng ký listener nhận sự kiện PING_COMPLETED phát ra từ PingEngine kèm cô lập lỗi
 private registerEventBusListeners(): void {
   eventBus.onPingCompleted(async (payload: PingCompletedEvent) => {
-    await this.handlePingCompleted(payload);
+    try {
+      await this.handlePingCompleted(payload);
+    } catch (error) {
+      console.error(`[IncidentService] Unhandled error processing ping for monitor ${payload.monitorId}:`, error);
+    }
   });
 }
 

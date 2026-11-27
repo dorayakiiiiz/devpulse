@@ -140,7 +140,7 @@ Code Push (Git) ➔ GitHub Actions (CI) ➔ Multi-stage Docker Build ➔ Docker 
 ### 4.2. Pipeline Tự động hóa CI/CD (GitHub Actions)
 - **CI Phase (Kiểm thử & Đóng gói):**
   - Kích hoạt khi có commit merge vào nhánh `main`.
-  - Chạy Linting (`eslint`), Type-checking (`tsc`), và Unit Tests (`vitest`).
+  - Chạy Type-checking (`tsc`), Unit & Integration Tests (`vitest`), và xác thực production build.
   - Đăng nhập và build Docker image, gắn tag commit hash và tag `latest`, đẩy lên **Docker Hub**.
 - **CD Phase (Triển khai tự động lên VPS):**
   - Sử dụng GitHub Actions SSH vào Linux VPS (qua SSH Private Key lưu an toàn trong GitHub Secrets).

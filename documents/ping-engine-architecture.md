@@ -168,6 +168,16 @@ private async executeSingleProbe(monitor: IMonitor): Promise<PingExecutionResult
   let isUp = false;
   let errorMessage: string | undefined;
 
+  if (!isSafeMonitorUrl(monitor.url)) {
+    return {
+      statusCode: 502,
+      latency: 1,
+      isUp: false,
+      error: 'Blocked private or internal target URL',
+      checkedAt: new Date(),
+    };
+  }
+
   try {
     const response = await fetch(monitor.url, {
       method: monitor.method || 'GET',
@@ -176,6 +186,8 @@ private async executeSingleProbe(monitor: IMonitor): Promise<PingExecutionResult
     });
 
     statusCode = response.status;
+    // Giải phóng stream và socket Undici ngay lập tức vì không tiêu thụ response body
+    await response.body?.cancel();
     // 2xx và 3xx được định nghĩa là hệ thống hoạt động bình thường (UP)
     isUp = statusCode >= 200 && statusCode < 400;
 
@@ -314,8 +326,13 @@ async flush(): Promise<number> {
     this.lastFlushAt = new Date();
     return itemsToFlush.length;
   } catch (error) {
-    // Nếu MongoDB gặp lỗi: nhét ngược dữ liệu lại vào đầu mảng để không làm mất bản ghi
+    // Nếu MongoDB gặp lỗi: nhét ngược dữ liệu lại vào đầu mảng và áp trần maxBufferSize = 5000 chống OOM
     this.buffer.unshift(...itemsToFlush);
+    if (this.buffer.length > this.maxBufferSize) {
+      const overflowCount = this.buffer.length - this.maxBufferSize;
+      this.buffer.splice(0, overflowCount);
+      console.warn(`[MetricBuffer] Buffer exceeded ${this.maxBufferSize} items; dropped ${overflowCount} oldest metrics.`);
+    }
     console.error('[MetricBuffer] Error during metric bulkWrite flush:', error);
     return 0;
   } finally {

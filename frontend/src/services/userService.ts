@@ -1,16 +1,6 @@
 import { apiClient } from './api';
 import { ApiSuccessResponse } from '../types/api';
-import { AuthUser } from '../types/auth';
-
-export interface UpdateProfilePayload {
-  name?: string;
-  slug?: string;
-}
-
-export interface ChangePasswordPayload {
-  currentPassword: string;
-  newPassword: string;
-}
+import { AuthUser, ChangePasswordPayload, UpdateProfilePayload } from '../types/auth';
 
 export const userService = {
   // Retrieve authenticated user profile

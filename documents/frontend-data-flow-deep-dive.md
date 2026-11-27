@@ -192,43 +192,49 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       set({ isConnected: true });
     };
 
-    es.onmessage = (event) => {
+    // Lắng nghe named event MONITOR_PING khớp với dòng "event: MONITOR_PING" từ Backend
+    es.addEventListener('MONITOR_PING', (event) => {
       try {
-        const payload = JSON.parse(event.data) as SseServerEvent;
-
-        if (payload.type === 'MONITOR_PING') {
-          // DUYỆT TẤT CẢ SUBSCRIBERS VỚI CƠ CHẾ BẢO VỆ FAULT ISOLATION
-          pingSubscribers.forEach((cb) => {
-            try {
-              cb(payload);
-            } catch (err) {
-              // Lỗi tại 1 component không làm sập luồng của các component khác
-              console.error('[Realtime SSE] Error in ping subscriber callback:', err);
-            }
-          });
-        } else if (payload.type === 'INCIDENT_ALERT') {
-          // BẬT TOAST HỆ THỐNG TỨC THÌ BẰNG IMPERATIVE API
-          if (payload.status === 'ongoing') {
-            toast.error(
-              payload.errorMessage || 'Service disruption detected on monitored endpoint.',
-              'Incident Alert'
-            );
-          } else if (payload.status === 'resolved') {
-            toast.success('Monitored endpoint has fully recovered.', 'Incident Resolved');
+        const payload = JSON.parse((event as MessageEvent<string>).data) as SseMonitorPingEvent;
+        // DUYỆT TẤT CẢ SUBSCRIBERS VỚI CƠ CHẾ BẢO VỆ FAULT ISOLATION
+        pingSubscribers.forEach((cb) => {
+          try {
+            cb(payload);
+          } catch (err) {
+            // Lỗi tại 1 component không làm sập luồng của các component khác
+            console.error('[Realtime SSE] Error in ping subscriber callback:', err);
           }
-
-          incidentSubscribers.forEach((cb) => {
-            try {
-              cb(payload);
-            } catch (err) {
-              console.error('[Realtime SSE] Error in incident subscriber callback:', err);
-            }
-          });
-        }
-      } catch {
-        // Bỏ qua heartbeat comment (: heartbeat\n\n) một cách an toàn
+        });
+      } catch (err) {
+        console.error('[Realtime SSE] Failed to parse MONITOR_PING payload:', err);
       }
-    };
+    });
+
+    // Lắng nghe named event INCIDENT_ALERT khớp với dòng "event: INCIDENT_ALERT" từ Backend
+    es.addEventListener('INCIDENT_ALERT', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent<string>).data) as SseIncidentAlertEvent;
+        // BẬT TOAST HỆ THỐNG TỨC THÌ BẰNG IMPERATIVE API
+        if (payload.status === 'ongoing') {
+          toast.error(
+            payload.errorMessage ?? 'Service disruption detected on monitored endpoint.',
+            'Incident Alert'
+          );
+        } else if (payload.status === 'resolved') {
+          toast.success('Monitored endpoint has fully recovered.', 'Incident Resolved');
+        }
+
+        incidentSubscribers.forEach((cb) => {
+          try {
+            cb(payload);
+          } catch (err) {
+            console.error('[Realtime SSE] Error in incident subscriber callback:', err);
+          }
+        });
+      } catch (err) {
+        console.error('[Realtime SSE] Failed to parse INCIDENT_ALERT payload:', err);
+      }
+    });
 
     es.onerror = () => {
       set({ isConnected: false });
@@ -270,7 +276,7 @@ Trước đây, các lập trình viên thường dùng React Context và bắt 
 **Nhược điểm chí mạng của phương pháp cũ:**
 - Hàm `showToast` phụ thuộc vào React Lifecycle, nếu truyền vào `useCallback` hoặc `useEffect`, nó phải nằm trong mảng dependencies `[showToast]`.
 - Nếu tham chiếu của hàm thay đổi hoặc component con re-render, nó kích hoạt lại `useEffect`, sinh ra các **vòng lặp re-fetch dữ liệu ngầm** (gây ra lỗi 404 kép khi xóa monitor).
-- Không thể gọi toast từ bên ngoài React (ví dụ: trong Axios Interceptor khi gặp lỗi 401/500, hoặc trong SSE onmessage callback).
+- Không thể gọi toast từ bên ngoài React (ví dụ: trong Axios Interceptor khi gặp lỗi 401/500, hoặc trong SSE event listener callback).
 
 ### 4.2. Giải pháp Clean Code: Standalone Imperative Dispatcher
 Ta tách biệt hoàn toàn state của Toast sang Zustand, biến việc gọi Toast thành mệnh lệnh trực tiếp `toast.success('...')`:
@@ -363,7 +369,7 @@ export function useMonitorDetail(id: string | undefined) {
     try {
       const [monitorData, incidentsData] = await Promise.all([
         monitorService.getMonitorById(id),
-        monitorService.getMonitorIncidents(id),
+        incidentService.getIncidentsByMonitor(id),
       ]);
       if (!isDeletedRef.current) {
         setMonitor(monitorData);
@@ -393,7 +399,7 @@ export function useMonitorDetail(id: string | undefined) {
       // Đẩy điểm mới lên đầu, giữ tối đa 30 điểm gần nhất
       return [
         {
-          id: crypto.randomUUID(),
+          id: `sse-${event.monitorId}-${event.timestamp}`,
           monitorId: event.monitorId,
           timestamp: event.timestamp,
           statusCode: event.statusCode,

@@ -2,6 +2,12 @@ import { useRealtimeStore } from '../../../src/stores/realtimeStore';
 import { toast } from '../../../src/stores/toastStore';
 import { SseMonitorPingEvent, SseIncidentAlertEvent } from '../../../src/types/api';
 
+interface TestEventSourceConstructor {
+  latestInstance: {
+    emitNamedEvent: (type: string, payload: unknown) => void;
+  } | null;
+}
+
 // Unit tests for real-time SSE subscriber store
 describe('realtimeStore', () => {
   beforeEach(() => {
@@ -39,7 +45,7 @@ describe('realtimeStore', () => {
     global.EventSource = originalEventSource;
   });
 
-  it('should fan-out MONITOR_PING events to subscribed listeners', () => {
+  it('should fan-out named MONITOR_PING events to subscribed listeners', () => {
     vi.useFakeTimers();
     useRealtimeStore.getState().connect('test-token');
     vi.advanceTimersByTime(20);
@@ -57,13 +63,16 @@ describe('realtimeStore', () => {
       timestamp: new Date().toISOString(),
     };
 
-    // Trigger message event on active mock EventSource
-    const activeEs = (useRealtimeStore as unknown as { eventSourceInstance?: EventSource }).eventSourceInstance;
-    // Dispatch via window or mock EventSource onmessage
-    window.dispatchEvent = vi.fn();
+    const esCtor = global.EventSource as unknown as TestEventSourceConstructor;
+    esCtor.latestInstance?.emitNamedEvent('MONITOR_PING', mockPingEvent);
 
-    // Directly test subscriber callback invocation via subscribePing
+    expect(pingListener).toHaveBeenCalledTimes(1);
+    expect(pingListener).toHaveBeenCalledWith(mockPingEvent);
+
     unsub();
+    esCtor.latestInstance?.emitNamedEvent('MONITOR_PING', mockPingEvent);
+    expect(pingListener).toHaveBeenCalledTimes(1);
+
     vi.useRealTimers();
   });
 
@@ -75,10 +84,15 @@ describe('realtimeStore', () => {
     unsub();
   });
 
-  it('should trigger system toast notification upon receiving ongoing incident event', () => {
+  it('should trigger system toast notification and notify subscribers on named INCIDENT_ALERT event', () => {
+    vi.useFakeTimers();
     const toastSpy = vi.spyOn(toast, 'error').mockImplementation(() => {});
+    const incidentListener = vi.fn();
+    const unsub = useRealtimeStore.getState().subscribeIncident(incidentListener);
 
-    // Dispatch incident
+    useRealtimeStore.getState().connect('incident-token');
+    vi.advanceTimersByTime(20);
+
     const mockIncidentEvent: SseIncidentAlertEvent = {
       type: 'INCIDENT_ALERT',
       incidentId: 'inc-1',
@@ -89,8 +103,14 @@ describe('realtimeStore', () => {
       errorMessage: '502 Bad Gateway',
     };
 
-    // We can verify toast helper works when ongoing
-    toast.error(mockIncidentEvent.errorMessage ?? 'Outage', 'Incident Alert');
+    const esCtor = global.EventSource as unknown as TestEventSourceConstructor;
+    esCtor.latestInstance?.emitNamedEvent('INCIDENT_ALERT', mockIncidentEvent);
+
     expect(toastSpy).toHaveBeenCalledWith('502 Bad Gateway', 'Incident Alert');
+    expect(incidentListener).toHaveBeenCalledTimes(1);
+    expect(incidentListener).toHaveBeenCalledWith(mockIncidentEvent);
+
+    unsub();
+    vi.useRealTimers();
   });
 });

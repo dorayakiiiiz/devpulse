@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
-import { User } from '../../src/models/userModel.js';
+import { UserModel } from '../../src/models/userModel.js';
 import { Monitor } from '../../src/models/monitorModel.js';
 import { createTestUser } from '../helpers/authHelper.js';
 
@@ -53,7 +53,7 @@ describe('Users Integration Tests', () => {
       const secondUser = await createTestUser({ email: 'second@example.com' });
 
       // First set a known slug for owner
-      await User.updateOne({ email: 'owner@example.com' }, { slug: 'claimed-slug' });
+      await UserModel.updateOne({ email: 'owner@example.com' }, { slug: 'claimed-slug' });
 
       const response = await request(app)
         .put('/api/users/profile')
@@ -128,7 +128,7 @@ describe('Users Integration Tests', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
 
-      const deletedUser = await User.findById(user._id);
+      const deletedUser = await UserModel.findById(user._id);
       expect(deletedUser).toBeNull();
 
       const orphanMonitors = await Monitor.find({ userId: user._id });

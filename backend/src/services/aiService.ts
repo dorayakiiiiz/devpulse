@@ -43,19 +43,16 @@ export class AiService {
     const providerType = env.AI_PROVIDER;
 
     if (providerType === 'gemini') {
-      const apiKey = env.GEMINI_API_KEY || env.LLM_API_KEY;
-      if (apiKey) {
-        this.provider = new GeminiProvider(apiKey, env.GEMINI_MODEL);
+      if (env.GEMINI_API_KEY) {
+        this.provider = new GeminiProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL);
         console.log(`[AI Service] Active provider: ${this.provider.name} (${env.GEMINI_MODEL})`);
         return;
       }
     }
 
-    const groqKey = env.GROQ_API_KEY || env.LLM_API_KEY;
-    if (groqKey) {
-      const model = env.GROQ_MODEL || env.LLM_MODEL;
-      this.provider = new GroqProvider(groqKey, model);
-      console.log(`[AI Service] Active provider: ${this.provider.name} (${model})`);
+    if (env.GROQ_API_KEY) {
+      this.provider = new GroqProvider(env.GROQ_API_KEY, env.GROQ_MODEL);
+      console.log(`[AI Service] Active provider: ${this.provider.name} (${env.GROQ_MODEL})`);
       return;
     }
 

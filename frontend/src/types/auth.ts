@@ -37,3 +37,13 @@ export interface AuthSessionResponse {
   accessToken: string;
 }
 
+export interface UpdateProfilePayload {
+  name?: string;
+  slug?: string;
+}
+
+export interface ChangePasswordPayload {
+  currentPassword: string;
+  newPassword: string;
+}
+

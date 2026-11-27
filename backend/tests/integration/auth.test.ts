@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { emailService } from '../../src/services/emailService.js';
-import { User } from '../../src/models/userModel.js';
+import { UserModel } from '../../src/models/userModel.js';
 import { OtpModel } from '../../src/models/otpModel.js';
 import { createTestUser } from '../helpers/authHelper.js';
 
@@ -25,7 +25,7 @@ describe('Auth Integration Tests', () => {
       expect(response.body.success).toBe(true);
       expect(emailSpy).toHaveBeenCalledWith('jane@example.com', expect.any(String));
 
-      const pendingUser = await User.findOne({ email: 'jane@example.com' });
+      const pendingUser = await UserModel.findOne({ email: 'jane@example.com' });
       expect(pendingUser).not.toBeNull();
       expect(pendingUser?.isVerified).toBe(false);
     });
@@ -88,7 +88,7 @@ describe('Auth Integration Tests', () => {
       expect(response.body.data.user.email).toBe('verify@example.com');
       expect(response.headers['set-cookie']).toBeDefined();
 
-      const user = await User.findOne({ email: 'verify@example.com' });
+      const user = await UserModel.findOne({ email: 'verify@example.com' });
       expect(user?.isVerified).toBe(true);
     });
 

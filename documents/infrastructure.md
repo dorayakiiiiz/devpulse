@@ -73,48 +73,47 @@ Mạng nội bộ Docker network giữa các container được cô lập hoàn 
 
 ---
 
-## 5. Continuous Integration and Continuous Deployment Pipelines
+## 5. Continuous Integration and Continuous Deployment Pipeline
 
-Kiến trúc CI/CD được phân tách thành hai workflow hoàn toàn độc lập nhằm đảm bảo an toàn bí mật hạ tầng (Least Privilege) và tối ưu thời gian phát hành:
+Kiến trúc CI/CD được hợp nhất trong một DAG workflow duy nhất tại `.github/workflows/ci-cd.yml` gồm 4 job nối tiếp nhằm tránh chạy trùng lặp test suite và đảm bảo an toàn bí mật hạ tầng theo nguyên tắc Least Privilege:
 
 ```mermaid
 flowchart TD
-    subgraph CI_Pipeline ["CI Pipeline (.github/workflows/ci.yml) - Mọi Push & PR"]
+    subgraph Quality_Gate ["Quality Gate Jobs (.github/workflows/ci-cd.yml) - Mọi Push & PR"]
         direction TB
-        A[Git Push / PR] --> B[Backend Quality Gate: type-check + 59 tests]
-        A --> C[Frontend Quality Gate: type-check + 59 tests + vite build]
+        A[Git Push / PR] --> B[Backend Quality Gate: type-check + tests + tsc build]
+        A --> C[Frontend Quality Gate: type-check + tests + vite build]
         B --> D{Quality Passed?}
         C --> D
     end
 
-    subgraph CD_Pipeline ["CD Pipeline (.github/workflows/cd.yml) - Chỉ khi Push vào main"]
+    subgraph Release_Deploy ["Build & Deploy Jobs - Chỉ khi Push vào main"]
         direction TB
         D -- "Code merged to main" --> E[Build Docker Images: Backend & Frontend]
         E --> F[Push Images to Docker Hub with tags: latest & sha]
         F --> G[SCP: Sync docker-compose.prod.yml & gateway.conf to VPS]
         G --> H[SSH: docker compose pull && up -d --remove-orphans]
-        H --> I[Docker prune old dangling layers]
+        H --> I[Nginx config test & reload + docker image prune -f]
         I --> J[Probe /api/health endpoint: Zero Downtime Verified]
     end
 ```
 
-### 5.1. Continuous Integration Workflow (`ci.yml`)
+### 5.1. Quality Gate Jobs (`backend-quality-gate` & `frontend-quality-gate`)
 Kích hoạt tự động khi có commit đẩy lên branch `main`, `develop` hoặc khi mở Pull Request vào `main`:
-- **Backend Quality Gate:** Kiểm tra type-checking với `tsc --noEmit`, thực thi toàn bộ 59 unit & integration tests trên runner Ubuntu cách ly.
-- **Frontend Quality Gate:** Kiểm tra type-checking với `tsc --noEmit`, chạy toàn bộ 59 component/hook tests, và xác thực đóng gói bundle production với Vite (`npm run build`).
-- **An toàn bảo mật:** Workflow CI tuyệt đối không chứa quyền truy cập vào SSH Key hay bí mật hạ tầng của server production.
+- **Backend Quality Gate:** Kiểm tra type-checking với `tsc --noEmit`, thực thi toàn bộ unit & integration tests trên runner Ubuntu cách ly, và xác thực biên dịch `npm run build`.
+- **Frontend Quality Gate:** Kiểm tra type-checking với `tsc --noEmit`, chạy toàn bộ component/hook/store tests, và xác thực đóng gói bundle production với Vite (`npm run build`).
+- **An toàn bảo mật:** Hai job Quality Gate hoàn toàn không được cấp quyền truy cập SSH Key hay bí mật hạ tầng của server production.
 
-### 5.2. Continuous Deployment Workflow (`cd.yml`)
-Kích hoạt tự động khi code đã được merge thành công vào nhánh `main`:
-- **Kiểm tra Quality Gate lần cuối:** Xác thực code sạch trước khi đóng gói.
-- **Build & Push Docker Images:** Sử dụng Docker Buildx trên GitHub runner (4 vCPU / 16GB RAM) để build multi-stage images và đẩy lên Docker Hub (`dorayakiiiiz/devpulse-backend` và `dorayakiiiiz/devpulse-frontend`). Server VPS hoàn toàn không tốn CPU/RAM để build code.
+### 5.2. Release & Deployment Jobs (`build-and-push` & `deploy-vps`)
+Chỉ kích hoạt khi cả hai Quality Gate đều pass và code được push vào nhánh `main` (hoặc chạy thủ công qua `workflow_dispatch`):
+- **Build & Push Docker Images:** Sử dụng Docker Buildx với cache scope riêng (`backend` và `frontend`) trên GitHub runner để build multi-stage images và đẩy lên Docker Hub (`dorayakiiiiz/devpulse-backend` và `dorayakiiiiz/devpulse-frontend`) với 2 tag `latest` và `${{ github.sha }}`.
 - **SSH Deployment & Rolling Restart:**
-  1. Tự động đồng bộ các file cấu hình `docker-compose.prod.yml` và `deploy/nginx/gateway.conf` sang thư mục `~/devpulse` trên VPS thông qua SCP Action.
-  2. Kết nối SSH vào VPS qua `appleboy/ssh-action` sử dụng SSH Key ed25519 đã ủy quyền.
-  3. Kéo images mới nhất bằng `docker compose pull` (chỉ mất vài giây do dùng Docker layer caching).
+  1. Tự động đồng bộ `docker-compose.prod.yml` và `deploy/nginx/gateway.conf` sang thư mục `~/devpulse` trên VPS thông qua SCP Action.
+  2. Kết nối SSH vào VPS qua `appleboy/ssh-action` sử dụng SSH Key ed25519 đã ủy quyền, truyền `IMAGE_TAG=${{ github.sha }}`.
+  3. Đăng nhập Docker Hub và kéo đúng image tag theo commit bằng `docker compose pull`.
   4. Tái khởi động containers bằng `docker compose up -d --remove-orphans` mà không làm gián đoạn database volume.
-  5. Xóa các layer image mồ côi bằng `docker image prune -f` để bảo vệ dung lượng ổ cứng SSD.
-  6. Kiểm tra trực tiếp endpoint `/api/health` để xác thực hệ thống online 100%.
+  5. Kiểm tra cú pháp và reload nóng `devpulse-gateway` (`nginx -t && nginx -s reload`) để cấu hình `gateway.conf` mới có hiệu lực ngay lập tức.
+  6. Xóa các layer image mồ côi bằng `docker image prune -f` và probe `http://localhost/api/health` xác thực hệ thống online 100%.
 
 ---
 

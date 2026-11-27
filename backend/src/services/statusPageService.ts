@@ -119,18 +119,20 @@ export class StatusPageService {
       };
     });
 
-    const publicIncidents: PublicIncidentItem[] = recentIncidents.map((incident) => {
-      const populatedMonitor = incident.monitorId as IMonitor;
-      return {
-        id: incident._id.toString(),
-        monitorName: populatedMonitor.name,
-        status: incident.status,
-        startedAt: incident.startedAt.toISOString(),
-        resolvedAt: incident.resolvedAt ? incident.resolvedAt.toISOString() : null,
-        errorMessage: incident.errorDetails.errorMessage,
-        aiSummary: incident.aiPostMortem?.summary,
-      };
-    });
+    const publicIncidents: PublicIncidentItem[] = recentIncidents
+      .filter((incident) => incident.monitorId !== null)
+      .map((incident) => {
+        const populatedMonitor = incident.monitorId as IMonitor;
+        return {
+          id: incident._id.toString(),
+          monitorName: populatedMonitor.name,
+          status: incident.status,
+          startedAt: incident.startedAt.toISOString(),
+          resolvedAt: incident.resolvedAt ? incident.resolvedAt.toISOString() : null,
+          errorMessage: incident.errorDetails.errorMessage,
+          aiSummary: incident.aiPostMortem?.summary,
+        };
+      });
 
     return {
       systemStatus,

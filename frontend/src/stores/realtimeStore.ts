@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { API_BASE_URL } from '../config/constants';
-import { SseIncidentAlertEvent, SseMonitorPingEvent, SseServerEvent } from '../types/api';
+import { SseIncidentAlertEvent, SseMonitorPingEvent } from '../types/api';
 import { toast } from './toastStore';
 
 type PingSubscriber = (event: SseMonitorPingEvent) => void;
@@ -48,45 +48,48 @@ export const useRealtimeStore = create<RealtimeState>((set) => ({
       set({ isConnected: true });
     };
 
-    es.onmessage = (event) => {
+    // Listen for named MONITOR_PING events emitted by backend SSE stream
+    es.addEventListener('MONITOR_PING', (event) => {
       try {
-        const payload = JSON.parse(event.data) as SseServerEvent;
-
-        if (payload.type === 'MONITOR_PING') {
-          // Notify all ping subscribers
-          pingSubscribers.forEach((cb) => {
-            try {
-              cb(payload);
-            } catch (err) {
-              console.error('[Realtime SSE] Error in ping subscriber callback:', err);
-            }
-          });
-        } else if (payload.type === 'INCIDENT_ALERT') {
-          // Show toast notification based on incident status
-          if (payload.status === 'ongoing') {
-            toast.error(
-              payload.errorMessage ?? 'Service disruption detected on monitored endpoint.',
-              'Incident Alert'
-            );
-          } else if (payload.status === 'resolved') {
-            toast.success(
-              'Monitored endpoint has fully recovered.',
-              'Incident Resolved'
-            );
+        const payload = JSON.parse((event as MessageEvent<string>).data) as SseMonitorPingEvent;
+        pingSubscribers.forEach((cb) => {
+          try {
+            cb(payload);
+          } catch (err) {
+            console.error('[Realtime SSE] Error in ping subscriber callback:', err);
           }
-          // Notify all incident subscribers
-          incidentSubscribers.forEach((cb) => {
-            try {
-              cb(payload);
-            } catch (err) {
-              console.error('[Realtime SSE] Error in incident subscriber callback:', err);
-            }
-          });
-        }
-      } catch {
-        // Discard heartbeat comments and non-JSON data safely
+        });
+      } catch (err) {
+        console.error('[Realtime SSE] Failed to parse MONITOR_PING payload:', err);
       }
-    };
+    });
+
+    // Listen for named INCIDENT_ALERT events emitted by backend SSE stream
+    es.addEventListener('INCIDENT_ALERT', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent<string>).data) as SseIncidentAlertEvent;
+        if (payload.status === 'ongoing') {
+          toast.error(
+            payload.errorMessage ?? 'Service disruption detected on monitored endpoint.',
+            'Incident Alert'
+          );
+        } else if (payload.status === 'resolved') {
+          toast.success(
+            'Monitored endpoint has fully recovered.',
+            'Incident Resolved'
+          );
+        }
+        incidentSubscribers.forEach((cb) => {
+          try {
+            cb(payload);
+          } catch (err) {
+            console.error('[Realtime SSE] Error in incident subscriber callback:', err);
+          }
+        });
+      } catch (err) {
+        console.error('[Realtime SSE] Failed to parse INCIDENT_ALERT payload:', err);
+      }
+    });
 
     es.onerror = () => {
       set({ isConnected: false });
